@@ -27,11 +27,21 @@ type App struct {
 	handler  http.Handler
 }
 
+const webAuthnCeremonyTimeout = 5 * time.Minute
+
 func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error) {
 	wa, err := webauthn.New(&webauthn.Config{
 		RPDisplayName: "Links",
 		RPID:          cfg.RPID,
 		RPOrigins:     []string{cfg.PublicOrigin},
+		Timeouts: webauthn.TimeoutsConfig{
+			Login: webauthn.TimeoutConfig{
+				Enforce: true, Timeout: webAuthnCeremonyTimeout, TimeoutUVD: webAuthnCeremonyTimeout,
+			},
+			Registration: webauthn.TimeoutConfig{
+				Enforce: true, Timeout: webAuthnCeremonyTimeout, TimeoutUVD: webAuthnCeremonyTimeout,
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure WebAuthn: %w", err)

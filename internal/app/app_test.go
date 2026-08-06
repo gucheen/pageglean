@@ -90,6 +90,45 @@ func TestStatusReportsSetupRequired(t *testing.T) {
 	}
 }
 
+func TestRegistrationStartCreatesUnexpiredCeremony(t *testing.T) {
+	application, data := newTestApp(t)
+	setupToken, err := data.CreateAdminToken(t.Context(), "setup", 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]string{"token": setupToken, "label": "Passkey"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/register/start", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var ceremonyCookie *http.Cookie
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == ceremonyCookieName {
+			ceremonyCookie = cookie
+			break
+		}
+	}
+	if ceremonyCookie == nil {
+		t.Fatal("registration start did not set the ceremony cookie")
+	}
+	if ceremonyCookie.MaxAge <= 0 || !ceremonyCookie.Expires.After(time.Now()) {
+		t.Fatalf("ceremony cookie is already expired: %#v", ceremonyCookie)
+	}
+	session, _, err := data.TakeCeremony(t.Context(), ceremonyCookie.Value, "registration")
+	if err != nil {
+		t.Fatalf("stored ceremony is already expired: %v", err)
+	}
+	if !session.Expires.After(time.Now()) {
+		t.Fatalf("stored ceremony expiry = %s", session.Expires)
+	}
+}
+
 func TestBookmarksRequireAuthentication(t *testing.T) {
 	application, _ := newTestApp(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/bookmarks", nil)
