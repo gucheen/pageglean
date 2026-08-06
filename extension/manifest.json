@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Links",
+  "version": "0.2.0",
+  "description": "一键保存当前网页到你的 Links 服务。",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "scripting",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "保存到 Links",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "commands": {
+    "save-current-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "保存当前页面"
+    }
+  }
+}

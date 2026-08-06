@@ -1,0 +1,146 @@
+package app
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"links/internal/config"
+	"links/internal/store"
+)
+
+func newTestApp(t *testing.T) (*App, *store.Store) {
+	t.Helper()
+	data, err := store.Open(filepath.Join(t.TempDir(), "links.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = data.Close() })
+	cfg := config.Config{
+		PublicURL: "http://localhost:8080", PublicOrigin: "http://localhost:8080",
+		RPID: "localhost", SecureCookies: false, DataDir: t.TempDir(),
+	}
+	application, err := New(cfg, data, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return application, data
+}
+
+func TestCaptureAcceptsPairedExtensionToken(t *testing.T) {
+	application, data := newTestApp(t)
+	code, _, err := data.CreateExtensionPairing(t.Context(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := data.RedeemExtensionPairing(t.Context(), code, "Test Chromium")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.NewBufferString(`{"url":"https://example.com/article","title":"Extension capture"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/capture", body)
+	request.Header.Set("Origin", "chrome-extension://abcdefghijklmnop")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "chrome-extension://abcdefghijklmnop" {
+		t.Fatalf("Access-Control-Allow-Origin = %q", got)
+	}
+}
+
+func TestExtensionPreflightIsLimitedToCaptureRoutes(t *testing.T) {
+	application, _ := newTestApp(t)
+	request := httptest.NewRequest(http.MethodOptions, "/api/capture", nil)
+	request.Header.Set("Origin", "chrome-extension://abcdefghijklmnop")
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", response.Code)
+	}
+}
+
+func TestStatusReportsSetupRequired(t *testing.T) {
+	application, _ := newTestApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	var payload struct {
+		SetupRequired bool `json:"setupRequired"`
+		Authenticated bool `json:"authenticated"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.SetupRequired || payload.Authenticated {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestBookmarksRequireAuthentication(t *testing.T) {
+	application, _ := newTestApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/bookmarks", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestOriginCheckRejectsCrossSiteMutation(t *testing.T) {
+	application, _ := newTestApp(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/login/start", nil)
+	request.Header.Set("Origin", "https://evil.example")
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestStaticAppHasSecurityHeaders(t *testing.T) {
+	application, _ := newTestApp(t)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if response.Header().Get("Content-Security-Policy") == "" {
+		t.Fatal("missing Content-Security-Policy")
+	}
+}
+
+func TestAuthenticatedExport(t *testing.T) {
+	application, data := newTestApp(t)
+	_, _, err := data.CreateBookmark(t.Context(), store.Bookmark{
+		URL: "https://example.com", CanonicalURL: "https://example.com/", Title: "Export me",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/export?format=json", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Export me") {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}

@@ -1,0 +1,215 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(filepath.Join(t.TempDir(), "links.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestOwnerIsCreatedOnce(t *testing.T) {
+	s := newTestStore(t)
+	user, err := s.LoadOwner(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(user.Handle) != 64 {
+		t.Fatalf("handle length = %d", len(user.Handle))
+	}
+	if len(user.Credentials) != 0 {
+		t.Fatalf("credentials = %d", len(user.Credentials))
+	}
+}
+
+func TestCreateBookmarkDeduplicatesCanonicalURL(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	first, duplicate, err := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/article#intro", CanonicalURL: "https://example.com/article", Title: "First",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate {
+		t.Fatal("first insert reported duplicate")
+	}
+	second, duplicate, err := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/article", CanonicalURL: "https://example.com/article", Title: "Second",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !duplicate {
+		t.Fatal("second insert did not report duplicate")
+	}
+	if first.ID != second.ID || second.Title != "First" {
+		t.Fatalf("unexpected duplicate result: %#v", second)
+	}
+}
+
+func TestListBookmarksFiltersAndSearches(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	_, _, _ = s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/zh", CanonicalURL: "https://example.com/zh", Title: "中文搜索", Unread: true,
+	})
+	_, _, _ = s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/go", CanonicalURL: "https://example.com/go", Title: "Go notes", Starred: true,
+	})
+
+	items, err := s.ListBookmarks(ctx, BookmarkFilter{Query: "中文", State: "unread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "中文搜索" {
+		t.Fatalf("unexpected items: %#v", items)
+	}
+}
+
+func TestAdminTokenRules(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	token, err := s.CreateAdminToken(ctx, "setup", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, kind, err := s.ValidateAdminToken(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != "setup" {
+		t.Fatalf("kind = %q", kind)
+	}
+	if err := s.ConsumeAdminToken(ctx, hash); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ValidateAdminToken(ctx, token); err == nil {
+		t.Fatal("consumed token remained valid")
+	}
+}
+
+func TestExtensionPairingIsOneTimeAndCaptureOnly(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	code, expires, err := s.CreateExtensionPairing(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !expires.After(time.Now()) {
+		t.Fatal("pairing code is already expired")
+	}
+	token, err := s.RedeemExtensionPairing(ctx, code, "My Chromium")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidateCaptureToken(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RedeemExtensionPairing(ctx, code, "Second client"); err == nil {
+		t.Fatal("pairing code was accepted twice")
+	}
+	clients, err := s.ListExtensionClients(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clients) != 1 || clients[0].Label != "My Chromium" {
+		t.Fatalf("unexpected clients: %#v", clients)
+	}
+	if err := s.RevokeExtensionClient(ctx, clients[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ValidateCaptureToken(ctx, token); err == nil {
+		t.Fatal("revoked token remained valid")
+	}
+}
+
+func TestOpenMigratesStageOneBookmarkTable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "links.db")
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE bookmarks (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT NOT NULL, canonical_url TEXT NOT NULL UNIQUE,
+			title TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', unread INTEGER NOT NULL DEFAULT 0,
+			starred INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_seen_at TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	created, _, err := s.CreateBookmark(context.Background(), Bookmark{
+		URL: "https://example.com", CanonicalURL: "https://example.com/", Title: "Migrated",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ArchiveStatus != "pending" {
+		t.Fatalf("archive status = %q", created.ArchiveStatus)
+	}
+}
+
+func TestChineseFTSIndexesTitleTagsAndArchivedBody(t *testing.T) {
+	s := newTestStore(t)
+	if !s.FTSEnabled() {
+		t.Skip("FTS5 is not enabled in this build")
+	}
+	ctx := context.Background()
+	first, _, err := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/title", CanonicalURL: "https://example.com/title",
+		Title: "中文搜索指南", Tags: []string{"知识管理"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteArchive(ctx, first.ID, ArchiveContent{Text: "标题命中的正文较短", Path: "a", Hash: "a"}); err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/body", CanonicalURL: "https://example.com/body", Title: "另一篇文章",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteArchive(ctx, second.ID, ArchiveContent{
+		Text: "这篇正文也讨论中文搜索、SQLite 和全文检索的实现。", Path: "b", Hash: "b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := s.ListBookmarks(ctx, BookmarkFilter{Query: "中文搜索", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != first.ID {
+		t.Fatalf("unexpected ranked results: %#v", items)
+	}
+	bodyItems, err := s.ListBookmarks(ctx, BookmarkFilter{Query: "全文检索", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bodyItems) != 1 || bodyItems[0].ID != second.ID || bodyItems[0].MatchSnippet == "" {
+		t.Fatalf("unexpected body results: %#v", bodyItems)
+	}
+}

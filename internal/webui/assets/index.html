@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#f6f4ef">
+    <title>Links</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div id="loadingView" class="center-shell">
+      <div class="brand brand-large"><span class="brand-mark">L</span><span>Links</span></div>
+      <p class="muted">正在打开你的网页记忆库…</p>
+    </div>
+
+    <main id="authView" class="center-shell" hidden>
+      <section class="auth-card">
+        <div class="brand brand-large"><span class="brand-mark">L</span><span>Links</span></div>
+        <p class="eyebrow">PRIVATE WEB MEMORY</p>
+        <h1 id="authTitle">用 Passkey 登录</h1>
+        <p id="authDescription" class="auth-description">你的书签保持私密，只能通过已注册的 Passkey 访问。</p>
+        <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
+        <div id="setupHelp" class="setup-help" hidden>
+          <p>应用尚未初始化。请先在服务器执行：</p>
+          <code>links admin setup-link</code>
+          <p>然后打开命令输出的一次性地址。</p>
+        </div>
+        <p id="authError" class="form-error" role="alert"></p>
+      </section>
+      <p class="auth-footnote">单用户 · 自托管 · 数据可迁移</p>
+    </main>
+
+    <div id="appView" class="app-shell" hidden>
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">L</span><span>Links</span></div>
+        <label class="search-box">
+          <span class="search-icon" aria-hidden="true">⌕</span>
+          <input id="searchInput" type="search" placeholder="搜索标题、网址或备注…" autocomplete="off">
+          <kbd>/</kbd>
+        </label>
+        <div class="topbar-actions">
+          <button id="addButton" class="button button-primary" type="button"><span aria-hidden="true">＋</span> 保存链接</button>
+          <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
+          <button id="logoutButton" class="icon-button account-button" type="button" title="退出登录" aria-label="退出登录">我</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <nav aria-label="书签筛选">
+            <button class="nav-item active" type="button" data-state="">
+              <span class="nav-icon">⌂</span><span>全部书签</span>
+            </button>
+            <button class="nav-item" type="button" data-state="unread">
+              <span class="nav-icon">◷</span><span>稍后阅读</span>
+            </button>
+            <button class="nav-item" type="button" data-state="starred">
+              <span class="nav-icon">☆</span><span>收藏</span>
+            </button>
+          </nav>
+          <div class="sidebar-note">
+            <span class="status-dot"></span>
+            <span>数据存储于你的服务器</span>
+          </div>
+        </aside>
+
+        <main class="content">
+          <div class="content-heading">
+            <div>
+              <p class="eyebrow">YOUR LIBRARY</p>
+              <h1 id="listTitle">全部书签</h1>
+            </div>
+            <p id="resultSummary" class="muted"></p>
+          </div>
+
+          <section id="bookmarkList" class="bookmark-list" aria-live="polite"></section>
+
+          <section id="emptyState" class="empty-state" hidden>
+            <div class="empty-glyph">↗</div>
+            <h2 id="emptyTitle">保存第一个链接</h2>
+            <p id="emptyDescription">从一个值得日后重看的网页开始。</p>
+            <button id="emptyAddButton" class="button button-secondary" type="button">添加链接</button>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="bookmarkDialog" class="dialog">
+      <form id="bookmarkForm" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">SAVE FOR LATER</p>
+            <h2 id="dialogTitle">保存链接</h2>
+          </div>
+          <button id="closeDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <input id="bookmarkId" type="hidden">
+        <label class="field" id="urlField">
+          <span>网址</span>
+          <input id="urlInput" type="url" required placeholder="https://example.com/article" autocomplete="url">
+        </label>
+        <label class="field">
+          <span>标题 <small>可选</small></span>
+          <input id="titleInput" type="text" maxlength="500" placeholder="留空也可以稍后编辑">
+        </label>
+        <label class="field">
+          <span>备注 <small>可选</small></span>
+          <textarea id="noteInput" maxlength="10000" rows="4" placeholder="为什么保存它？"></textarea>
+        </label>
+        <label class="field">
+          <span>标签 <small>用逗号分隔</small></span>
+          <input id="tagsInput" type="text" placeholder="AI, 产品, 阅读">
+        </label>
+        <div class="check-row">
+          <label class="check"><input id="unreadInput" type="checkbox"><span>稍后阅读</span></label>
+          <label class="check"><input id="starredInput" type="checkbox"><span>收藏</span></label>
+        </div>
+        <p id="dialogError" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelDialogButton" class="button button-ghost" type="button">取消</button>
+          <button id="saveButton" class="button button-primary" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="settingsDialog" class="dialog settings-dialog">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">CAPTURE CLIENTS</p>
+          <h2>浏览器扩展</h2>
+        </div>
+        <button id="closeSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <p class="settings-copy">生成一个 10 分钟有效的配对码，在 Chromium 扩展的连接设置中输入。</p>
+      <div id="pairingCodeView" class="pairing-code-view" hidden>
+        <span>配对码</span>
+        <strong id="pairingCode"></strong>
+        <small id="pairingExpiry"></small>
+      </div>
+      <button id="generatePairingButton" class="button button-primary" type="button">生成配对码</button>
+      <div class="settings-section">
+        <h3>已连接设备</h3>
+        <div id="extensionClients" class="client-list"></div>
+      </div>
+      <div class="settings-section">
+        <h3>数据与存储</h3>
+        <div id="storageStats" class="storage-stats">正在读取…</div>
+        <div class="export-links">
+          <a class="button button-ghost" href="/api/export?format=json">导出 JSON</a>
+          <a class="button button-ghost" href="/api/export?format=csv">导出 CSV</a>
+          <a class="button button-ghost" href="/api/export?format=html">导出浏览器书签</a>
+        </div>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

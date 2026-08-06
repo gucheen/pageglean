@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Links 扩展设置</title>
+    <link rel="stylesheet" href="extension.css">
+  </head>
+  <body class="options-body">
+    <main class="options-card">
+      <header class="extension-brand extension-brand-large"><span class="extension-mark">L</span><span>Links</span></header>
+      <p class="kicker">CHROMIUM CAPTURE</p>
+      <h1>连接你的 Links 服务</h1>
+      <p class="description">在 Links 网页的“设置 → 浏览器扩展”中生成配对码，然后在这里完成连接。</p>
+      <form id="pairForm">
+        <label>服务地址<input id="serverInput" type="url" required placeholder="https://links.example.com"></label>
+        <label>配对码<input id="codeInput" type="text" required maxlength="9" placeholder="ABCD-EFGH" autocomplete="one-time-code"></label>
+        <label>设备名称<input id="deviceInput" type="text" maxlength="100" value="Chromium"></label>
+        <button id="connectButton" class="primary" type="submit">连接服务</button>
+      </form>
+      <p id="pairStatus" class="status" role="status"></p>
+      <section id="connectedView" class="connected" hidden>
+        <span class="connected-dot"></span>
+        <div><strong>扩展已连接</strong><p id="connectedServer"></p></div>
+        <button id="disconnectButton" class="secondary" type="button">断开</button>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

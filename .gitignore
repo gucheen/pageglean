@@ -1,0 +1,7 @@
+/data/
+/links
+/.env
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
