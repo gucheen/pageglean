@@ -2,6 +2,9 @@ const state = {
   filter: "",
   query: "",
   bookmarks: [],
+  selected: new Set(),
+  importFile: null,
+  importMapping: {},
   setupToken: new URLSearchParams(location.search).get("token") || "",
 };
 
@@ -13,12 +16,16 @@ const authButton = $("#authButton");
 const authError = $("#authError");
 const bookmarkDialog = $("#bookmarkDialog");
 const settingsDialog = $("#settingsDialog");
+const importDialog = $("#importDialog");
 let searchTimer;
 let toastTimer;
+let importPreviewVersion = 0;
 
 async function request(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   const response = await fetch(path, { ...options, headers });
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));
@@ -193,6 +200,7 @@ async function loadBookmarks() {
   try {
     const payload = await request(`/api/bookmarks?${params}`);
     state.bookmarks = payload.bookmarks || [];
+    state.selected.clear();
     renderBookmarks();
   } catch (error) {
     if (error.message.includes("Passkey")) {
@@ -208,6 +216,7 @@ function renderBookmarks() {
   const list = $("#bookmarkList");
   const empty = $("#emptyState");
   list.replaceChildren();
+  renderBulkBar();
   $("#resultSummary").textContent = state.bookmarks.length ? `${state.bookmarks.length} 条结果` : "";
   if (!state.bookmarks.length) {
     empty.hidden = false;
@@ -224,6 +233,16 @@ function renderBookmarks() {
 
 function bookmarkRow(bookmark) {
   const row = element("article", "bookmark-row");
+  const selected = document.createElement("input");
+  selected.type = "checkbox";
+  selected.className = "select-bookmark";
+  selected.setAttribute("aria-label", `选择 ${bookmark.title || bookmark.url}`);
+  selected.checked = state.selected.has(bookmark.id);
+  selected.addEventListener("change", () => {
+    if (selected.checked) state.selected.add(bookmark.id);
+    else state.selected.delete(bookmark.id);
+    renderBulkBar();
+  });
   const star = element("button", `star-button${bookmark.starred ? " active" : ""}`, bookmark.starred ? "★" : "☆");
   star.type = "button";
   star.title = bookmark.starred ? "取消收藏" : "收藏";
@@ -247,6 +266,8 @@ function bookmarkRow(bookmark) {
     meta.append(archiveLink);
   } else if (bookmark.archiveStatus === "failed") {
     meta.append(element("span", "badge failed", "归档失败"));
+  } else if (bookmark.archiveStatus === "idle") {
+    meta.append(element("span", "badge", "未归档"));
   } else {
     meta.append(element("span", "badge pending", bookmark.archiveStatus === "processing" ? "正在归档" : "等待归档"));
   }
@@ -264,15 +285,56 @@ function bookmarkRow(bookmark) {
   remove.type = "button";
   remove.addEventListener("click", () => deleteBookmark(bookmark));
   actions.append(unread, edit);
-  if (bookmark.archiveStatus === "failed") {
-    const retry = element("button", "text-button", "重试归档");
+  if (bookmark.archiveStatus === "failed" || bookmark.archiveStatus === "idle") {
+    const retry = element("button", "text-button", bookmark.archiveStatus === "idle" ? "归档" : "重试归档");
     retry.type = "button";
     retry.addEventListener("click", () => retryArchive(bookmark.id));
     actions.append(retry);
   }
   actions.append(remove);
-  row.append(star, body, actions);
+  row.append(selected, star, body, actions);
   return row;
+}
+
+function renderBulkBar() {
+  const bar = $("#bulkBar");
+  const count = state.selected.size;
+  bar.hidden = count === 0;
+  $("#selectionCount").textContent = `已选择 ${count} 条`;
+}
+
+function selectedIDs() {
+  return [...state.selected];
+}
+
+async function applyBulkUpdate(patch, successMessage) {
+  const ids = selectedIDs();
+  if (!ids.length) return;
+  try {
+    const result = await request("/api/bookmarks/bulk", {
+      method: "PATCH",
+      body: JSON.stringify({ ids, ...patch }),
+    });
+    showToast(`${successMessage}（${result.updated} 条）`);
+    await loadBookmarks();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function bulkDelete() {
+  const ids = selectedIDs();
+  if (!ids.length || !confirm(`确定删除选中的 ${ids.length} 条书签？此操作无法撤销。`)) return;
+  try {
+    const result = await request("/api/bookmarks/bulk", {
+      method: "DELETE",
+      body: JSON.stringify({ ids }),
+    });
+    showToast(`已删除 ${result.deleted} 条书签`);
+    await loadBookmarks();
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
 function element(tag, className = "", text = "") {
@@ -448,6 +510,116 @@ async function generatePairingCode() {
   }
 }
 
+function openImportDialog() {
+  settingsDialog.close();
+  $("#importForm").reset();
+  $("#importError").textContent = "";
+  $("#importPreview").hidden = true;
+  $("#csvMapping").hidden = true;
+  $("#importButton").disabled = true;
+  state.importFile = null;
+  state.importMapping = {};
+  importDialog.showModal();
+}
+
+async function previewImport() {
+  if (!state.importFile) return;
+  const version = ++importPreviewVersion;
+  const preview = $("#importPreview");
+  const importButton = $("#importButton");
+  $("#importError").textContent = "";
+  preview.hidden = false;
+  preview.textContent = "正在分析文件…";
+  importButton.disabled = true;
+  try {
+    const form = importFormData(false);
+    const result = await request("/api/import/preview", { method: "POST", body: form });
+    if (version !== importPreviewVersion) return;
+    state.importMapping = result.mapping || {};
+    renderCSVMapping(result);
+    renderImportPreview(result);
+    importButton.disabled = result.importable === 0 || (result.format === "csv" && !result.mapping?.url);
+  } catch (error) {
+    if (version !== importPreviewVersion) return;
+    preview.hidden = true;
+    $("#importError").textContent = error.message;
+  }
+}
+
+function importFormData(includeArchive) {
+  const form = new FormData();
+  form.append("file", state.importFile);
+  if (Object.keys(state.importMapping).length) form.append("mapping", JSON.stringify(state.importMapping));
+  if (includeArchive) form.append("archive", String($("#importArchive").checked));
+  return form;
+}
+
+function renderCSVMapping(result) {
+  const container = $("#csvMapping");
+  if (result.format !== "csv") {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  const fields = [
+    ["url", "网址（必选）"], ["title", "标题"], ["note", "备注"], ["tags", "标签"],
+    ["unread", "稍后阅读"], ["starred", "收藏"], ["createdAt", "创建时间"],
+  ];
+  const mappingFields = $("#mappingFields");
+  mappingFields.replaceChildren();
+  for (const [key, label] of fields) {
+    const wrapper = element("label", "mapping-field");
+    wrapper.append(element("span", "", label));
+    const select = document.createElement("select");
+    select.dataset.mapping = key;
+    select.append(new Option("不导入", ""));
+    for (const header of result.headers || []) select.append(new Option(header, header));
+    select.value = result.mapping?.[key] || "";
+    select.addEventListener("change", () => {
+      state.importMapping = Object.fromEntries(
+        [...document.querySelectorAll("[data-mapping]")].map((node) => [node.dataset.mapping, node.value]),
+      );
+      previewImport();
+    });
+    wrapper.append(select);
+    mappingFields.append(wrapper);
+  }
+}
+
+function renderImportPreview(result) {
+  const container = $("#importPreview");
+  container.replaceChildren();
+  const formatName = { json: "拾页 JSON", html: "浏览器书签 HTML", csv: "CSV" }[result.format] || result.format;
+  container.append(element("p", "import-summary", `${formatName} · ${result.rows} 行 · 可导入 ${result.importable} 条 · 跳过 ${result.invalid} 条`));
+  if (!result.preview?.length) return;
+  const list = element("ul", "import-preview-list");
+  for (const item of result.preview.slice(0, 5)) {
+    const row = document.createElement("li");
+    row.append(element("strong", "", item.title || item.url));
+    row.append(element("span", "", item.url));
+    list.append(row);
+  }
+  container.append(list);
+}
+
+async function submitImport(event) {
+  event.preventDefault();
+  if (!state.importFile) return;
+  const button = $("#importButton");
+  setButtonBusy(button, true, "导入中…");
+  $("#importError").textContent = "";
+  try {
+    const result = await request("/api/import", { method: "POST", body: importFormData(true) });
+    importDialog.close();
+    showToast(`导入完成：新增 ${result.created}，重复 ${result.duplicates}，跳过 ${result.invalid}`);
+    await loadBookmarks();
+  } catch (error) {
+    $("#importError").textContent = error.message;
+  } finally {
+    setButtonBusy(button, false, "开始导入");
+  }
+}
+
 function showToast(message) {
   const toast = $("#toast");
   clearTimeout(toastTimer);
@@ -460,10 +632,49 @@ $("#addButton").addEventListener("click", openCreateDialog);
 $("#settingsButton").addEventListener("click", openSettings);
 $("#closeSettingsButton").addEventListener("click", () => settingsDialog.close());
 $("#generatePairingButton").addEventListener("click", generatePairingCode);
+$("#openImportButton").addEventListener("click", openImportDialog);
+$("#closeImportButton").addEventListener("click", () => importDialog.close());
+$("#cancelImportButton").addEventListener("click", () => importDialog.close());
+$("#importForm").addEventListener("submit", submitImport);
+$("#importFile").addEventListener("change", (event) => {
+  state.importFile = event.target.files?.[0] || null;
+  state.importMapping = {};
+  if (state.importFile) previewImport();
+});
 $("#emptyAddButton").addEventListener("click", openCreateDialog);
 $("#closeDialogButton").addEventListener("click", () => bookmarkDialog.close());
 $("#cancelDialogButton").addEventListener("click", () => bookmarkDialog.close());
 $("#bookmarkForm").addEventListener("submit", submitBookmark);
+$("#selectPageButton").addEventListener("click", () => {
+  for (const bookmark of state.bookmarks) state.selected.add(bookmark.id);
+  document.querySelectorAll(".select-bookmark").forEach((checkbox) => { checkbox.checked = true; });
+  renderBulkBar();
+});
+$("#clearSelectionButton").addEventListener("click", () => {
+  state.selected.clear();
+  document.querySelectorAll(".select-bookmark").forEach((checkbox) => { checkbox.checked = false; });
+  renderBulkBar();
+});
+$("#bulkDeleteButton").addEventListener("click", bulkDelete);
+document.querySelectorAll("[data-bulk-state]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const action = button.dataset.bulkState;
+    if (action === "unread") applyBulkUpdate({ unread: true }, "已标记为稍后阅读");
+    if (action === "read") applyBulkUpdate({ unread: false }, "已标记为已读");
+    if (action === "starred") applyBulkUpdate({ starred: true }, "已添加收藏");
+    if (action === "unstarred") applyBulkUpdate({ starred: false }, "已取消收藏");
+  });
+});
+document.querySelectorAll("[data-bulk-tags]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const mode = button.dataset.bulkTags;
+    const raw = prompt(mode === "add" ? "输入要添加的标签，用逗号分隔" : "输入要移除的标签，用逗号分隔");
+    if (raw === null) return;
+    const tags = raw.split(/[,，]/).map((value) => value.trim()).filter(Boolean);
+    if (!tags.length) return;
+    applyBulkUpdate(mode === "add" ? { addTags: tags } : { removeTags: tags }, mode === "add" ? "已添加标签" : "已移除标签");
+  });
+});
 $("#logoutButton").addEventListener("click", async () => {
   await request("/api/auth/logout", { method: "POST" });
   const status = await request("/api/status");
@@ -494,6 +705,7 @@ document.addEventListener("keydown", (event) => {
     $("#searchInput").focus();
   }
   if (event.key === "Escape" && bookmarkDialog.open) bookmarkDialog.close();
+  if (event.key === "Escape" && importDialog.open) importDialog.close();
 });
 
 init();

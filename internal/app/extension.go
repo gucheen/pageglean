@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"links/internal/bookmarks"
-	"links/internal/store"
+	"pageglean/internal/bookmarks"
+	"pageglean/internal/store"
 )
 
 type extensionPairRequest struct {

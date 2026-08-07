@@ -1,4 +1,4 @@
-module links
+module pageglean
 
 go 1.26
 
@@ -6,6 +6,7 @@ require (
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/go-webauthn/webauthn v0.16.2
 	github.com/mattn/go-sqlite3 v1.14.32
+	golang.org/x/net v0.51.0
 	golang.org/x/text v0.35.0
 )
 
@@ -24,6 +25,5 @@ require (
 	github.com/tinylib/msgp v1.6.3 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/crypto v0.49.0 // indirect
-	golang.org/x/net v0.51.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 )

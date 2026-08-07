@@ -7,9 +7,9 @@
 ## Docker Compose
 
 ```bash
-export LINKS_PUBLIC_URL=https://links.example.com
+export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
 docker compose up --build -d
-docker compose exec links /app/links admin setup-link
+docker compose exec pageglean /app/pageglean admin setup-link
 ```
 
 `data/` 是唯一需要持久化和备份的目录。不要把它放在临时文件系统中。
@@ -19,22 +19,22 @@ docker compose exec links /app/links admin setup-link
 Caddy 示例：
 
 ```caddyfile
-links.example.com {
+pageglean.example.com {
     reverse_proxy 127.0.0.1:8080
     encode zstd gzip
 }
 ```
 
-Passkey 与域名绑定。正式初始化后不要随意修改 `LINKS_PUBLIC_URL` 或 `LINKS_RP_ID`；必须迁移域名时，先在 VPS 上准备好 `admin recovery-link` 能力。
+Passkey 与域名绑定。正式初始化后不要随意修改 `PAGEGLEAN_PUBLIC_URL` 或 `PAGEGLEAN_RP_ID`；必须迁移域名时，先在 VPS 上准备好 `admin recovery-link` 能力。
 
 ## 网络抓取安全
 
-默认 `LINKS_ALLOW_PRIVATE_FETCH=false`，后台归档会拒绝回环、私网、链路本地和云元数据地址，以降低 SSRF 风险。
+默认 `PAGEGLEAN_ALLOW_PRIVATE_FETCH=false`，后台归档会拒绝回环、私网、链路本地和云元数据地址，以降低 SSRF 风险。
 
 只有明确需要归档家庭局域网服务时才设置：
 
 ```bash
-export LINKS_ALLOW_PRIVATE_FETCH=true
+export PAGEGLEAN_ALLOW_PRIVATE_FETCH=true
 ```
 
 开启后，任何能创建书签的扩展 Token 都可能促使服务器访问内网 URL，因此应及时撤销丢失设备。
@@ -44,8 +44,8 @@ export LINKS_ALLOW_PRIVATE_FETCH=true
 在线创建一致性 SQLite 快照，并和压缩正文一起写入 tar.gz：
 
 ```bash
-docker compose exec links /app/links admin backup --output /data/links-backup.tar.gz
-docker compose exec links /app/links admin verify-backup --input /data/links-backup.tar.gz
+docker compose exec pageglean /app/pageglean admin backup --output /data/pageglean-backup.tar.gz
+docker compose exec pageglean /app/pageglean admin verify-backup --input /data/pageglean-backup.tar.gz
 ```
 
 建议将备份文件复制到 VPS 之外。Web UI 的 JSON/CSV/HTML 导出适合数据迁移，但不包含压缩正文；CLI 备份才是完整灾难恢复包。
@@ -55,19 +55,19 @@ docker compose exec links /app/links admin verify-backup --input /data/links-bac
 恢复会替换实例数据，因此先在一个全新的空目录中演练：
 
 ```bash
-mkdir links-restore-test
-tar -xzf links-backup.tar.gz -C links-restore-test
+mkdir pageglean-restore-test
+tar -xzf pageglean-backup.tar.gz -C pageglean-restore-test
 ```
 
 确认目录内至少包含：
 
 ```text
 manifest.json
-links.db
+pageglean.db
 blobs/
 ```
 
-然后把 `links.db` 和 `blobs/` 放入新实例的 `LINKS_DATA_DIR`，使用与原实例相同的公开域名/RP ID 启动。若使用不同域名，已有 Passkey 不适用，需要在新实例通过 CLI 创建恢复链接并注册新 Passkey。
+然后把 `pageglean.db` 和 `blobs/` 放入新实例的 `PAGEGLEAN_DATA_DIR`，使用与原实例相同的公开域名/RP ID 启动。若使用不同域名，已有 Passkey 不适用，需要在新实例通过 CLI 创建恢复链接并注册新 Passkey。
 
 ## 升级
 

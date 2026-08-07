@@ -20,44 +20,43 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	publicURL := envOr("LINKS_PUBLIC_URL", "http://localhost:8080")
+	publicURL := envOr("PAGEGLEAN_PUBLIC_URL", "http://localhost:8080")
 	parsed, err := url.Parse(publicURL)
 	if err != nil {
-		return Config{}, fmt.Errorf("parse LINKS_PUBLIC_URL: %w", err)
+		return Config{}, fmt.Errorf("parse PAGEGLEAN_PUBLIC_URL: %w", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return Config{}, fmt.Errorf("LINKS_PUBLIC_URL must use http or https")
+		return Config{}, fmt.Errorf("PAGEGLEAN_PUBLIC_URL must use http or https")
 	}
 	if parsed.Hostname() == "" {
-		return Config{}, fmt.Errorf("LINKS_PUBLIC_URL must include a hostname")
+		return Config{}, fmt.Errorf("PAGEGLEAN_PUBLIC_URL must include a hostname")
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
-		return Config{}, fmt.Errorf("LINKS_PUBLIC_URL must not include a path")
+		return Config{}, fmt.Errorf("PAGEGLEAN_PUBLIC_URL must not include a path")
 	}
 	if parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return Config{}, fmt.Errorf("LINKS_PUBLIC_URL must be an origin without credentials, query, or fragment")
+		return Config{}, fmt.Errorf("PAGEGLEAN_PUBLIC_URL must be an origin without credentials, query, or fragment")
 	}
 
-	rpID := strings.TrimSpace(os.Getenv("LINKS_RP_ID"))
+	rpID := strings.TrimSpace(os.Getenv("PAGEGLEAN_RP_ID"))
 	if rpID == "" {
 		rpID = parsed.Hostname()
 	}
-	dataDir := envOr("LINKS_DATA_DIR", "./data")
+	dataDir := envOr("PAGEGLEAN_DATA_DIR", "./data")
 	absDataDir, err := filepath.Abs(dataDir)
 	if err != nil {
-		return Config{}, fmt.Errorf("resolve LINKS_DATA_DIR: %w", err)
+		return Config{}, fmt.Errorf("resolve PAGEGLEAN_DATA_DIR: %w", err)
 	}
-
 	origin := parsed.Scheme + "://" + parsed.Host
 	return Config{
-		Addr:              envOr("LINKS_ADDR", ":8080"),
+		Addr:              envOr("PAGEGLEAN_ADDR", ":8080"),
 		PublicURL:         strings.TrimRight(origin, "/"),
 		PublicOrigin:      origin,
 		RPID:              rpID,
 		DataDir:           absDataDir,
-		DatabasePath:      filepath.Join(absDataDir, "links.db"),
+		DatabasePath:      filepath.Join(absDataDir, "pageglean.db"),
 		SecureCookies:     parsed.Scheme == "https",
-		AllowPrivateFetch: strings.EqualFold(strings.TrimSpace(os.Getenv("LINKS_ALLOW_PRIVATE_FETCH")), "true"),
+		AllowPrivateFetch: strings.EqualFold(strings.TrimSpace(os.Getenv("PAGEGLEAN_ALLOW_PRIVATE_FETCH")), "true"),
 	}, nil
 }
 

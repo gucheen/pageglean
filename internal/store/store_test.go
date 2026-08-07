@@ -10,7 +10,7 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "links.db"))
+	s, err := Open(filepath.Join(t.TempDir(), "pageglean.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestExtensionPairingIsOneTimeAndCaptureOnly(t *testing.T) {
 }
 
 func TestOpenMigratesStageOneBookmarkTable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "links.db")
+	path := filepath.Join(t.TempDir(), "pageglean.db")
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
 		t.Fatal(err)
@@ -211,5 +211,65 @@ func TestChineseFTSIndexesTitleTagsAndArchivedBody(t *testing.T) {
 	}
 	if len(bodyItems) != 1 || bodyItems[0].ID != second.ID || bodyItems[0].MatchSnippet == "" {
 		t.Fatalf("unexpected body results: %#v", bodyItems)
+	}
+}
+
+func TestImportedBookmarkCanSkipArchiveAndPreserveDate(t *testing.T) {
+	s := newTestStore(t)
+	createdAt := time.Date(2022, 3, 4, 5, 6, 7, 0, time.UTC)
+	bookmark, _, err := s.CreateBookmark(context.Background(), Bookmark{
+		URL: "https://example.com/imported", CanonicalURL: "https://example.com/imported",
+		Title: "Imported", CaptureSource: "import", SkipArchive: true, CreatedAt: createdAt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bookmark.ArchiveStatus != "idle" || !bookmark.CreatedAt.Equal(createdAt) {
+		t.Fatalf("unexpected imported bookmark: %#v", bookmark)
+	}
+	if job, err := s.ClaimArchiveJob(context.Background()); err == nil || job != nil {
+		t.Fatalf("import unexpectedly created an archive job: %#v", job)
+	}
+	if err := s.RetryArchive(context.Background(), bookmark.ID); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.ClaimArchiveJob(context.Background())
+	if err != nil || job.BookmarkID != bookmark.ID {
+		t.Fatalf("manual archive did not enqueue imported bookmark: job=%#v err=%v", job, err)
+	}
+}
+
+func TestBulkUpdateAndDeleteBookmarks(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	first, _, _ := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/one", CanonicalURL: "https://example.com/one", Tags: []string{"旧标签"},
+	})
+	second, _, _ := s.CreateBookmark(ctx, Bookmark{
+		URL: "https://example.com/two", CanonicalURL: "https://example.com/two", Tags: []string{"保留"},
+	})
+	unread := true
+	updated, err := s.BulkUpdateBookmarks(ctx, []int64{first.ID, second.ID, first.ID}, BulkBookmarkPatch{
+		AddTags: []string{"批量"}, RemoveTags: []string{"旧标签"}, Unread: &unread,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != 2 {
+		t.Fatalf("updated = %d, want 2", updated)
+	}
+	got, err := s.GetBookmark(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Unread || len(got.Tags) != 1 || got.Tags[0] != "批量" {
+		t.Fatalf("unexpected bulk update: %#v", got)
+	}
+	deleted, err := s.BulkDeleteBookmarks(ctx, []int64{first.ID, second.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 2 {
+		t.Fatalf("deleted = %d, want 2", deleted)
 	}
 }

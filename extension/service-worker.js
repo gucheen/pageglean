@@ -1,10 +1,10 @@
-const MENU_PAGE = "links-save-page";
-const MENU_LINK = "links-save-link";
+const MENU_PAGE = "pageglean-save-page";
+const MENU_LINK = "pageglean-save-link";
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: MENU_PAGE, title: "保存页面到 Links", contexts: ["page", "selection"] });
-    chrome.contextMenus.create({ id: MENU_LINK, title: "保存链接到 Links", contexts: ["link"] });
+    chrome.contextMenus.create({ id: MENU_PAGE, title: "保存页面到拾页", contexts: ["page", "selection"] });
+    chrome.contextMenus.create({ id: MENU_LINK, title: "保存链接到拾页", contexts: ["link"] });
   });
 });
 
@@ -77,7 +77,7 @@ async function capturePayload(payload, tabId) {
   const connection = await getConnection();
   if (!connection) {
     await chrome.runtime.openOptionsPage();
-    return finishCapture(tabId, { ok: false, error: "请先连接 Links 服务" });
+    return finishCapture(tabId, { ok: false, error: "请先连接拾页服务" });
   }
   try {
     const response = await fetch(`${connection.serverUrl}/api/capture`, {
@@ -117,6 +117,6 @@ async function getConnection() {
 function readableError(error) {
   const message = error?.message || String(error);
   if (message.includes("Cannot access contents")) return "这个浏览器页面不能由扩展读取";
-  if (message.includes("Failed to fetch")) return "无法连接 Links 服务";
+  if (message.includes("Failed to fetch")) return "无法连接拾页服务";
   return message;
 }

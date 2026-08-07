@@ -3,8 +3,10 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"links/internal/config"
-	"links/internal/store"
+	"pageglean/internal/config"
+	"pageglean/internal/store"
 )
 
 func newTestApp(t *testing.T) (*App, *store.Store) {
 	t.Helper()
-	data, err := store.Open(filepath.Join(t.TempDir(), "links.db"))
+	data, err := store.Open(filepath.Join(t.TempDir(), "pageglean.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,5 +183,68 @@ func TestAuthenticatedExport(t *testing.T) {
 	application.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Export me") {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAuthenticatedHTMLImportSkipsArchiveByDefault(t *testing.T) {
+	application, data := newTestApp(t)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("file", "bookmarks.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(file, `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><A HREF="https://example.com/imported" TAGS="迁移">导入文章</A></DL><p>`)
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/import", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	items, err := data.ListBookmarks(t.Context(), store.BookmarkFilter{Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ArchiveStatus != "idle" || items[0].CaptureSource != "import" {
+		t.Fatalf("unexpected imported bookmark: %#v", items)
+	}
+}
+
+func TestAuthenticatedBulkUpdate(t *testing.T) {
+	application, data := newTestApp(t)
+	bookmark, _, err := data.CreateBookmark(t.Context(), store.Bookmark{
+		URL: "https://example.com/bulk", CanonicalURL: "https://example.com/bulk",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bytes.NewBufferString(fmt.Sprintf(`{"ids":[%d],"addTags":["批量"],"unread":true}`, bookmark.ID))
+	request := httptest.NewRequest(http.MethodPatch, "/api/bookmarks/bulk", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	response := httptest.NewRecorder()
+	application.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	updated, err := data.GetBookmark(t.Context(), bookmark.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Unread || len(updated.Tags) != 1 || updated.Tags[0] != "批量" {
+		t.Fatalf("unexpected bulk update: %#v", updated)
 	}
 }

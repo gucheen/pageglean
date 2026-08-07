@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"links/internal/store"
+	"pageglean/internal/store"
 )
 
 type Manifest struct {
@@ -28,12 +28,12 @@ func Create(ctx context.Context, data *store.Store, dataDir, output string) erro
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	tempDir, err := os.MkdirTemp("", "links-backup-")
+	tempDir, err := os.MkdirTemp("", "pageglean-backup-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tempDir)
-	snapshot := filepath.Join(tempDir, "links.db")
+	snapshot := filepath.Join(tempDir, "pageglean.db")
 	if err := data.BackupDatabase(ctx, snapshot); err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func Create(ctx context.Context, data *store.Store, dataDir, output string) erro
 	if err := addBytes(tarWriter, "manifest.json", manifest); err != nil {
 		return err
 	}
-	if err := addFile(tarWriter, snapshot, "links.db"); err != nil {
+	if err := addFile(tarWriter, snapshot, "pageglean.db"); err != nil {
 		return err
 	}
 	blobDir := filepath.Join(dataDir, "blobs")
@@ -134,7 +134,7 @@ func Verify(path string) error {
 				return fmt.Errorf("unsupported backup format version %d", manifest.FormatVersion)
 			}
 			foundManifest = true
-		case "links.db":
+		case "pageglean.db":
 			headerBytes := make([]byte, 16)
 			if _, err := io.ReadFull(reader, headerBytes); err != nil {
 				return fmt.Errorf("read SQLite snapshot: %w", err)
@@ -146,7 +146,7 @@ func Verify(path string) error {
 		}
 	}
 	if !foundManifest || !foundDatabase {
-		return fmt.Errorf("backup is missing manifest.json or links.db")
+		return fmt.Errorf("backup is missing manifest.json or a PageGlean SQLite database")
 	}
 	return nil
 }

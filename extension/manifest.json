@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Links",
+  "name": "拾页 · PageGlean",
   "version": "0.2.0",
-  "description": "一键保存当前网页到你的 Links 服务。",
+  "description": "一键保存当前网页到你的拾页服务。",
   "minimum_chrome_version": "120",
   "permissions": [
     "activeTab",
@@ -19,7 +19,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "保存到 Links",
+    "default_title": "保存到拾页",
     "default_popup": "popup.html"
   },
   "options_page": "options.html",

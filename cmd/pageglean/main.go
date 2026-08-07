@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"links/internal/app"
-	"links/internal/backup"
-	"links/internal/config"
-	"links/internal/store"
+	"pageglean/internal/app"
+	"pageglean/internal/backup"
+	"pageglean/internal/config"
+	"pageglean/internal/store"
 )
 
 func main() {
@@ -67,7 +67,7 @@ func serve(cfg config.Config, data *store.Store) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("Links started", "addr", cfg.Addr, "public_url", cfg.PublicURL, "rp_id", cfg.RPID)
+		logger.Info("PageGlean started", "addr", cfg.Addr, "public_url", cfg.PublicURL, "rp_id", cfg.RPID)
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -132,7 +132,7 @@ func admin(cfg config.Config, data *store.Store, args []string) error {
 
 func createBackup(cfg config.Config, data *store.Store, args []string) error {
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
-	defaultName := "links-backup-" + time.Now().UTC().Format("20060102-150405") + ".tar.gz"
+	defaultName := "pageglean-backup-" + time.Now().UTC().Format("20060102-150405") + ".tar.gz"
 	output := flags.String("output", defaultName, "backup archive path")
 	if err := flags.Parse(args); err != nil {
 		return err

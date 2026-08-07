@@ -3,14 +3,14 @@ package config
 import "testing"
 
 func TestLoadDerivesRPID(t *testing.T) {
-	t.Setenv("LINKS_PUBLIC_URL", "https://links.example.com")
-	t.Setenv("LINKS_DATA_DIR", t.TempDir())
+	t.Setenv("PAGEGLEAN_PUBLIC_URL", "https://pageglean.example.com")
+	t.Setenv("PAGEGLEAN_DATA_DIR", t.TempDir())
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RPID != "links.example.com" {
+	if cfg.RPID != "pageglean.example.com" {
 		t.Fatalf("RPID = %q", cfg.RPID)
 	}
 	if !cfg.SecureCookies {
@@ -19,7 +19,7 @@ func TestLoadDerivesRPID(t *testing.T) {
 }
 
 func TestLoadRejectsPath(t *testing.T) {
-	t.Setenv("LINKS_PUBLIC_URL", "https://links.example.com/app")
+	t.Setenv("PAGEGLEAN_PUBLIC_URL", "https://pageglean.example.com/app")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected an error for a public URL with path")
 	}

@@ -51,8 +51,8 @@ func (a *App) handleArchiveRead(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, max-age=3600")
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s · Links</title><link rel="stylesheet" href="/reader.css"></head>
-<body><header class="reader-header"><a href="/">← 返回 Links</a><a href="%s" target="_blank" rel="noopener noreferrer">打开原网页 ↗</a></header><main>`,
+<title>%s · 拾页</title><link rel="stylesheet" href="/reader.css"></head>
+<body><header class="reader-header"><a href="/">← 返回拾页</a><a href="%s" target="_blank" rel="noopener noreferrer">打开原网页 ↗</a></header><main>`,
 		html.EscapeString(bookmark.Title), html.EscapeString(bookmark.URL))
 	_, _ = w.Write(fragment)
 	_, _ = w.Write([]byte(`</main></body></html>`))

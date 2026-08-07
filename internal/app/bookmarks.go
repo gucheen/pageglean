@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"links/internal/bookmarks"
-	"links/internal/store"
+	"pageglean/internal/bookmarks"
+	"pageglean/internal/store"
 )
 
 type createBookmarkRequest struct {
@@ -24,6 +24,14 @@ type updateBookmarkRequest struct {
 	Tags    *[]string `json:"tags"`
 	Unread  *bool     `json:"unread"`
 	Starred *bool     `json:"starred"`
+}
+
+type bulkBookmarkRequest struct {
+	IDs        []int64  `json:"ids"`
+	AddTags    []string `json:"addTags"`
+	RemoveTags []string `json:"removeTags"`
+	Unread     *bool    `json:"unread"`
+	Starred    *bool    `json:"starred"`
 }
 
 func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
@@ -139,4 +147,60 @@ func (a *App) handleBookmarksDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *App) handleBookmarksBulkUpdate(w http.ResponseWriter, r *http.Request) {
+	var input bulkBookmarkRequest
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validateBulkRequest(w, input) {
+		return
+	}
+	if len(input.AddTags) == 0 && len(input.RemoveTags) == 0 && input.Unread == nil && input.Starred == nil {
+		writeError(w, http.StatusBadRequest, "没有需要批量修改的字段")
+		return
+	}
+	updated, err := a.store.BulkUpdateBookmarks(r.Context(), input.IDs, store.BulkBookmarkPatch{
+		AddTags: input.AddTags, RemoveTags: input.RemoveTags, Unread: input.Unread, Starred: input.Starred,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"updated": updated})
+}
+
+func (a *App) handleBookmarksBulkDelete(w http.ResponseWriter, r *http.Request) {
+	var input bulkBookmarkRequest
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if !validateBulkRequest(w, input) {
+		return
+	}
+	deleted, err := a.store.BulkDeleteBookmarks(r.Context(), input.IDs)
+	if err != nil {
+		a.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
+}
+
+func validateBulkRequest(w http.ResponseWriter, input bulkBookmarkRequest) bool {
+	if len(input.IDs) == 0 || len(input.IDs) > 500 {
+		writeError(w, http.StatusBadRequest, "每次请选择 1 至 500 条书签")
+		return false
+	}
+	if len(input.AddTags)+len(input.RemoveTags) > 100 {
+		writeError(w, http.StatusBadRequest, "批量标签数量过多")
+		return false
+	}
+	for _, tag := range append(append([]string{}, input.AddTags...), input.RemoveTags...) {
+		if len([]rune(strings.TrimSpace(tag))) > 50 {
+			writeError(w, http.StatusBadRequest, "标签不能超过 50 个字符")
+			return false
+		}
+	}
+	return true
 }

@@ -9,12 +9,12 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"links/internal/store"
+	"pageglean/internal/store"
 )
 
 const (
-	sessionCookieName  = "links_session"
-	ceremonyCookieName = "links_webauthn"
+	sessionCookieName  = "pageglean_session"
+	ceremonyCookieName = "pageglean_webauthn"
 )
 
 type registrationStartRequest struct {

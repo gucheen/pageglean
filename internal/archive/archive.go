@@ -23,8 +23,8 @@ import (
 
 	readability "github.com/go-shiori/go-readability"
 
-	"links/internal/config"
-	"links/internal/store"
+	"pageglean/internal/config"
+	"pageglean/internal/store"
 )
 
 const (
@@ -121,7 +121,7 @@ func (a *Archiver) fetchAndStore(ctx context.Context, value string) (store.Archi
 	if err != nil {
 		return store.ArchiveContent{}, err
 	}
-	request.Header.Set("User-Agent", "Links/1.0 (+personal bookmark archiver)")
+	request.Header.Set("User-Agent", "PageGlean/1.0 (+personal bookmark archiver)")
 	request.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9")
 
 	response, err := a.client.Do(request)

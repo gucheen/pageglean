@@ -19,7 +19,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 	_ "github.com/mattn/go-sqlite3"
 
-	searchindex "links/internal/search"
+	searchindex "pageglean/internal/search"
 )
 
 //go:embed schema.sql
@@ -67,6 +67,7 @@ type Bookmark struct {
 	CreatedAt     time.Time  `json:"createdAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
 	LastSeenAt    time.Time  `json:"lastSeenAt"`
+	SkipArchive   bool       `json:"-"`
 }
 
 type BookmarkFilter struct {
@@ -74,6 +75,13 @@ type BookmarkFilter struct {
 	State  string
 	Limit  int
 	Offset int
+}
+
+type BulkBookmarkPatch struct {
+	AddTags    []string
+	RemoveTags []string
+	Unread     *bool
+	Starred    *bool
 }
 
 type ExtensionClient struct {
@@ -168,7 +176,7 @@ func (s *Store) init(ctx context.Context) error {
 		}
 		_, err = s.db.ExecContext(ctx, `
 			INSERT INTO users (id, webauthn_handle, name, display_name, created_at)
-			VALUES (1, ?, 'owner', 'Links Owner', ?)
+			VALUES (1, ?, 'owner', '拾页用户', ?)
 		`, handle, formatTime(s.now()))
 		if err != nil {
 			return fmt.Errorf("create owner: %w", err)
@@ -607,7 +615,7 @@ func (s *Store) RedeemExtensionPairing(ctx context.Context, code, label string) 
 	if err != nil {
 		return "", err
 	}
-	token := "links_cap_" + base64.RawURLEncoding.EncodeToString(tokenRaw)
+	token := "pageglean_cap_" + base64.RawURLEncoding.EncodeToString(tokenRaw)
 	tokenHash := sha256.Sum256([]byte(token))
 	label = strings.TrimSpace(label)
 	if label == "" {
@@ -630,7 +638,7 @@ func (s *Store) RedeemExtensionPairing(ctx context.Context, code, label string) 
 }
 
 func (s *Store) ValidateCaptureToken(ctx context.Context, token string) error {
-	if !strings.HasPrefix(token, "links_cap_") || len(token) < 48 || len(token) > 80 {
+	if !strings.HasPrefix(token, "pageglean_cap_") || len(token) < 48 || len(token) > 80 {
 		return ErrNotFound
 	}
 	hash := sha256.Sum256([]byte(token))
@@ -1020,14 +1028,16 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 				return Bookmark{}, false, err
 			}
 		}
-		_, err = tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO archive_jobs
-			    (bookmark_id, status, attempts, available_at, created_at, updated_at)
-			SELECT id, 'pending', 0, ?, ?, ? FROM bookmarks
-			WHERE id = ? AND archive_status != 'complete'
-		`, formatTime(s.now()), formatTime(s.now()), formatTime(s.now()), existingID)
-		if err != nil {
-			return Bookmark{}, false, err
+		if !bookmark.SkipArchive {
+			_, err = tx.ExecContext(ctx, `
+				INSERT OR IGNORE INTO archive_jobs
+				    (bookmark_id, status, attempts, available_at, created_at, updated_at)
+				SELECT id, 'pending', 0, ?, ?, ? FROM bookmarks
+				WHERE id = ? AND archive_status != 'complete'
+			`, formatTime(s.now()), formatTime(s.now()), formatTime(s.now()), existingID)
+			if err != nil {
+				return Bookmark{}, false, err
+			}
 		}
 		if err := s.reindexBookmarkTx(ctx, tx, existingID); err != nil {
 			return Bookmark{}, false, err
@@ -1043,17 +1053,25 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	}
 
 	now := s.now().UTC()
+	createdAt := bookmark.CreatedAt.UTC()
+	if createdAt.IsZero() || createdAt.After(now) {
+		createdAt = now
+	}
 	if bookmark.CaptureSource == "" {
 		bookmark.CaptureSource = "web"
+	}
+	archiveStatus := "pending"
+	if bookmark.SkipArchive {
+		archiveStatus = "idle"
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO bookmarks
 		    (url, canonical_url, title, description, author, note, unread, starred, capture_source,
 		     archive_status, created_at, updated_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, bookmark.URL, bookmark.CanonicalURL, bookmark.Title, bookmark.Description, bookmark.Author,
-		bookmark.Note, bookmark.Unread, bookmark.Starred, bookmark.CaptureSource,
-		formatTime(now), formatTime(now), formatTime(now))
+		bookmark.Note, bookmark.Unread, bookmark.Starred, bookmark.CaptureSource, archiveStatus,
+		formatTime(createdAt), formatTime(now), formatTime(now))
 	if err != nil {
 		return Bookmark{}, false, fmt.Errorf("insert bookmark: %w", err)
 	}
@@ -1061,12 +1079,14 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	if err != nil {
 		return Bookmark{}, false, err
 	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO archive_jobs (bookmark_id, status, attempts, available_at, created_at, updated_at)
-		VALUES (?, 'pending', 0, ?, ?, ?)
-	`, id, formatTime(now), formatTime(now), formatTime(now))
-	if err != nil {
-		return Bookmark{}, false, fmt.Errorf("enqueue archive: %w", err)
+	if !bookmark.SkipArchive {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO archive_jobs (bookmark_id, status, attempts, available_at, created_at, updated_at)
+			VALUES (?, 'pending', 0, ?, ?, ?)
+		`, id, formatTime(now), formatTime(now), formatTime(now))
+		if err != nil {
+			return Bookmark{}, false, fmt.Errorf("enqueue archive: %w", err)
+		}
 	}
 	if err := s.setBookmarkTagsTx(ctx, tx, id, bookmark.Tags); err != nil {
 		return Bookmark{}, false, err
@@ -1196,6 +1216,138 @@ func (s *Store) UpdateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 		return Bookmark{}, err
 	}
 	return s.GetBookmark(ctx, bookmark.ID)
+}
+
+func (s *Store) BulkUpdateBookmarks(ctx context.Context, ids []int64, patch BulkBookmarkPatch) (int, error) {
+	ids = uniquePositiveIDs(ids)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	unread := optionalBool(patch.Unread)
+	starred := optionalBool(patch.Starred)
+	updated := 0
+	for _, id := range ids {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE bookmarks SET
+				unread = CASE WHEN ? IS NULL THEN unread ELSE ? END,
+				starred = CASE WHEN ? IS NULL THEN starred ELSE ? END,
+				updated_at = ?
+			WHERE id = ?
+		`, unread, unread, starred, starred, formatTime(s.now()), id)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			continue
+		}
+		updated++
+		if len(patch.AddTags) > 0 || len(patch.RemoveTags) > 0 {
+			tags, err := loadBookmarkTagsTx(ctx, tx, id)
+			if err != nil {
+				return 0, err
+			}
+			remove := map[string]struct{}{}
+			for _, tag := range patch.RemoveTags {
+				remove[strings.ToLower(strings.TrimSpace(tag))] = struct{}{}
+			}
+			merged := make([]string, 0, len(tags)+len(patch.AddTags))
+			for _, tag := range tags {
+				if _, found := remove[strings.ToLower(tag)]; !found {
+					merged = append(merged, tag)
+				}
+			}
+			merged = append(merged, patch.AddTags...)
+			if err := s.setBookmarkTagsTx(ctx, tx, id, merged); err != nil {
+				return 0, err
+			}
+			if err := s.reindexBookmarkTx(ctx, tx, id); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return updated, nil
+}
+
+func (s *Store) BulkDeleteBookmarks(ctx context.Context, ids []int64) (int, error) {
+	ids = uniquePositiveIDs(ids)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	deleted := 0
+	for _, id := range ids {
+		if s.ftsEnabled {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM bookmark_fts WHERE bookmark_id = ?`, id); err != nil {
+				return 0, err
+			}
+		}
+		result, err := tx.ExecContext(ctx, `DELETE FROM bookmarks WHERE id = ?`, id)
+		if err != nil {
+			return 0, err
+		}
+		affected, _ := result.RowsAffected()
+		deleted += int(affected)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func optionalBool(value *bool) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func uniquePositiveIDs(values []int64) []int64 {
+	result := make([]int64, 0, len(values))
+	seen := map[int64]struct{}{}
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func loadBookmarkTagsTx(ctx context.Context, tx *sql.Tx, bookmarkID int64) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT t.name FROM tags t JOIN bookmark_tags bt ON bt.tag_id = t.id
+		WHERE bt.bookmark_id = ? ORDER BY t.name COLLATE NOCASE
+	`, bookmarkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tags := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tags = append(tags, name)
+	}
+	return tags, rows.Err()
 }
 
 func (s *Store) DeleteBookmark(ctx context.Context, id int64) error {

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"links/internal/store"
+	"pageglean/internal/store"
 )
 
 func TestCreateAndVerify(t *testing.T) {
 	dataDir := t.TempDir()
-	data, err := store.Open(filepath.Join(dataDir, "links.db"))
+	data, err := store.Open(filepath.Join(dataDir, "pageglean.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestCreateAndVerify(t *testing.T) {
 	}
 	restoreDir := t.TempDir()
 	extractBackupForTest(t, output, restoreDir)
-	restored, err := store.Open(filepath.Join(restoreDir, "links.db"))
+	restored, err := store.Open(filepath.Join(restoreDir, "pageglean.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     unread INTEGER NOT NULL DEFAULT 0 CHECK (unread IN (0, 1)),
     starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
     capture_source TEXT NOT NULL DEFAULT 'web',
-    archive_status TEXT NOT NULL DEFAULT 'pending' CHECK (archive_status IN ('pending', 'processing', 'complete', 'failed')),
+    archive_status TEXT NOT NULL DEFAULT 'pending' CHECK (archive_status IN ('idle', 'pending', 'processing', 'complete', 'failed')),
     archive_error TEXT NOT NULL DEFAULT '',
     content_text TEXT NOT NULL DEFAULT '',
     content_path TEXT NOT NULL DEFAULT '',

@@ -12,10 +12,10 @@ import (
 
 	"github.com/go-webauthn/webauthn/webauthn"
 
-	"links/internal/archive"
-	"links/internal/config"
-	"links/internal/store"
-	"links/internal/webui"
+	"pageglean/internal/archive"
+	"pageglean/internal/config"
+	"pageglean/internal/store"
+	"pageglean/internal/webui"
 )
 
 type App struct {
@@ -31,7 +31,7 @@ const webAuthnCeremonyTimeout = 5 * time.Minute
 
 func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error) {
 	wa, err := webauthn.New(&webauthn.Config{
-		RPDisplayName: "Links",
+		RPDisplayName: "拾页",
 		RPID:          cfg.RPID,
 		RPOrigins:     []string{cfg.PublicOrigin},
 		Timeouts: webauthn.TimeoutsConfig{
@@ -77,9 +77,13 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/capture", a.handleCapture)
 	mux.Handle("GET /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksList)))
 	mux.Handle("POST /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksCreate)))
+	mux.Handle("PATCH /api/bookmarks/bulk", a.requireAuth(http.HandlerFunc(a.handleBookmarksBulkUpdate)))
+	mux.Handle("DELETE /api/bookmarks/bulk", a.requireAuth(http.HandlerFunc(a.handleBookmarksBulkDelete)))
 	mux.Handle("PATCH /api/bookmarks/{id}", a.requireAuth(http.HandlerFunc(a.handleBookmarksUpdate)))
 	mux.Handle("DELETE /api/bookmarks/{id}", a.requireAuth(http.HandlerFunc(a.handleBookmarksDelete)))
 	mux.Handle("POST /api/bookmarks/{id}/archive/retry", a.requireAuth(http.HandlerFunc(a.handleArchiveRetry)))
+	mux.Handle("POST /api/import/preview", a.requireAuth(http.HandlerFunc(a.handleImportPreview)))
+	mux.Handle("POST /api/import", a.requireAuth(http.HandlerFunc(a.handleImportCommit)))
 	mux.Handle("GET /archive/{id}", a.requireAuth(http.HandlerFunc(a.handleArchiveRead)))
 	mux.Handle("GET /api/export", a.requireAuth(http.HandlerFunc(a.handleExport)))
 	mux.Handle("GET /api/stats", a.requireAuth(http.HandlerFunc(a.handleStats)))

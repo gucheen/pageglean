@@ -4,26 +4,26 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <meta name="theme-color" content="#f6f4ef">
-    <title>Links</title>
+    <meta name="theme-color" content="#fafaf9">
+    <title>拾页 · PageGlean</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
     <div id="loadingView" class="center-shell">
-      <div class="brand brand-large"><span class="brand-mark">L</span><span>Links</span></div>
+      <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
       <p class="muted">正在打开你的网页记忆库…</p>
     </div>
 
     <main id="authView" class="center-shell" hidden>
       <section class="auth-card">
-        <div class="brand brand-large"><span class="brand-mark">L</span><span>Links</span></div>
+        <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
         <p class="eyebrow">PRIVATE WEB MEMORY</p>
         <h1 id="authTitle">用 Passkey 登录</h1>
         <p id="authDescription" class="auth-description">你的书签保持私密，只能通过已注册的 Passkey 访问。</p>
         <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
         <div id="setupHelp" class="setup-help" hidden>
           <p>应用尚未初始化。请先在服务器执行：</p>
-          <code>links admin setup-link</code>
+          <code>pageglean admin setup-link</code>
           <p>然后打开命令输出的一次性地址。</p>
         </div>
         <p id="authError" class="form-error" role="alert"></p>
@@ -33,10 +33,10 @@
 
     <div id="appView" class="app-shell" hidden>
       <header class="topbar">
-        <div class="brand"><span class="brand-mark">L</span><span>Links</span></div>
+        <div class="brand"><span class="brand-mark">拾</span><span>拾页</span></div>
         <label class="search-box">
           <span class="search-icon" aria-hidden="true">⌕</span>
-          <input id="searchInput" type="search" placeholder="搜索标题、网址或备注…" autocomplete="off">
+          <input id="searchInput" type="search" placeholder="搜索标题、标签或正文…" autocomplete="off">
           <kbd>/</kbd>
         </label>
         <div class="topbar-actions">
@@ -72,6 +72,21 @@
               <h1 id="listTitle">全部书签</h1>
             </div>
             <p id="resultSummary" class="muted"></p>
+          </div>
+
+          <div id="bulkBar" class="bulk-bar" hidden>
+            <strong id="selectionCount">已选择 0 条</strong>
+            <div class="bulk-actions">
+              <button id="selectPageButton" class="text-button" type="button">选择本页</button>
+              <button class="text-button" type="button" data-bulk-state="unread">稍后阅读</button>
+              <button class="text-button" type="button" data-bulk-state="read">标为已读</button>
+              <button class="text-button" type="button" data-bulk-state="starred">收藏</button>
+              <button class="text-button" type="button" data-bulk-state="unstarred">取消收藏</button>
+              <button class="text-button" type="button" data-bulk-tags="add">添加标签</button>
+              <button class="text-button" type="button" data-bulk-tags="remove">移除标签</button>
+              <button id="bulkDeleteButton" class="text-button danger" type="button">删除</button>
+              <button id="clearSelectionButton" class="text-button" type="button">取消选择</button>
+            </div>
           </div>
 
           <section id="bookmarkList" class="bookmark-list" aria-live="polite"></section>
@@ -146,12 +161,45 @@
       <div class="settings-section">
         <h3>数据与存储</h3>
         <div id="storageStats" class="storage-stats">正在读取…</div>
-        <div class="export-links">
+        <div class="export-actions">
+          <button id="openImportButton" class="button button-primary" type="button">导入书签</button>
           <a class="button button-ghost" href="/api/export?format=json">导出 JSON</a>
           <a class="button button-ghost" href="/api/export?format=csv">导出 CSV</a>
           <a class="button button-ghost" href="/api/export?format=html">导出浏览器书签</a>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="importDialog" class="dialog import-dialog">
+      <form id="importForm" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">BRING YOUR LIBRARY</p>
+            <h2>导入书签</h2>
+          </div>
+          <button id="closeImportButton" class="icon-button" type="button" aria-label="关闭">×</button>
+        </div>
+        <p class="settings-copy">支持拾页 JSON、浏览器书签 HTML 和 CSV；单个文件不超过 10 MB、最多 20,000 条。</p>
+        <label class="field">
+          <span>书签文件</span>
+          <input id="importFile" type="file" accept=".json,.html,.htm,.csv,application/json,text/html,text/csv" required>
+        </label>
+        <div id="csvMapping" class="csv-mapping" hidden>
+          <h3>CSV 字段映射</h3>
+          <p class="muted">网址列必选，其他字段可以留空。</p>
+          <div id="mappingFields" class="mapping-fields"></div>
+        </div>
+        <label class="check import-archive-option">
+          <input id="importArchive" type="checkbox">
+          <span>导入后逐条归档正文 <small>低配 VPS 建议保持关闭</small></span>
+        </label>
+        <div id="importPreview" class="import-preview" hidden></div>
+        <p id="importError" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancelImportButton" class="button button-ghost" type="button">取消</button>
+          <button id="importButton" class="button button-primary" type="submit" disabled>开始导入</button>
+        </div>
+      </form>
     </dialog>
 
     <div id="toast" class="toast" role="status" hidden></div>

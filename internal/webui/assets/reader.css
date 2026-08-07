@@ -1,6 +1,6 @@
 :root {
-  color: #25231f;
-  background: #f6f4ef;
+  color: #242424;
+  background: #fafaf9;
   font-family: Georgia, "Noto Serif SC", "Songti SC", serif;
   line-height: 1.85;
 }
@@ -12,18 +12,18 @@ body { margin: 0; }
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  border-bottom: 1px solid #dedbd2;
+  border-bottom: 1px solid #e5e5e5;
   font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
 }
-.reader-header a { color: #77736a; text-decoration: none; }
-.reader-header a:hover { color: #cc4a28; }
-main { width: min(calc(100% - 40px), 720px); margin: 64px auto 100px; }
-.reader-article h1 { margin: 0 0 16px; font-size: clamp(32px, 6vw, 48px); line-height: 1.18; letter-spacing: -0.035em; }
-.reader-byline { margin: 0 0 42px !important; color: #77736a; font-family: ui-sans-serif, sans-serif; font-size: 14px; }
+.reader-header a { color: #737373; text-decoration: none; }
+.reader-header a:hover { color: #c84b2b; }
+main { width: min(calc(100% - 40px), 720px); margin: 56px auto 88px; }
+.reader-article h1 { margin: 0 0 16px; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: clamp(30px, 5vw, 44px); line-height: 1.2; letter-spacing: -0.03em; }
+.reader-byline { margin: 0 0 34px !important; color: #737373; font-family: ui-sans-serif, sans-serif; font-size: 14px; }
 .reader-article p { margin: 0 0 1.4em; font-size: 18px; }
 @media (max-width: 600px) {
   .reader-header { padding: 0 16px; }
-  main { margin-top: 40px; }
+  main { margin-top: 36px; }
   .reader-article p { font-size: 17px; }
 }

@@ -1,5 +1,5 @@
 /data/
-/links
+/pageglean
 /.env
 *.db
 *.db-shm

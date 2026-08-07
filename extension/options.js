@@ -32,7 +32,7 @@ pairForm.addEventListener("submit", async (event) => {
     const serverUrl = normalizeServer(document.querySelector("#serverInput").value);
     const originPattern = `${serverUrl}/*`;
     const granted = await chrome.permissions.request({ origins: [originPattern] });
-    if (!granted) throw new Error("需要允许扩展访问你的 Links 服务地址");
+    if (!granted) throw new Error("需要允许扩展访问你的拾页服务地址");
     const response = await fetch(`${serverUrl}/api/extension/pair`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -60,7 +60,7 @@ pairForm.addEventListener("submit", async (event) => {
 document.querySelector("#disconnectButton").addEventListener("click", async () => {
   await chrome.storage.local.remove(["token"]);
   connectedView.hidden = true;
-  pairStatus.textContent = "已在当前浏览器中断开；如需彻底撤销，请同时在 Links 网页中撤销该设备。";
+  pairStatus.textContent = "已在当前浏览器中断开；如需彻底撤销，请同时在拾页网页中撤销该设备。";
 });
 
 refresh();

@@ -3,7 +3,7 @@ const status = document.querySelector("#status");
 
 chrome.runtime.sendMessage({ type: "connection-status" }, (result) => {
   if (!result?.connected) {
-    status.textContent = "尚未连接 Links 服务";
+    status.textContent = "尚未连接拾页服务";
     saveButton.textContent = "前往连接";
   }
 });

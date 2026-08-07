@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"links/internal/config"
-	"links/internal/store"
+	"pageglean/internal/config"
+	"pageglean/internal/store"
 )
 
 func TestProcessOneArchivesReadableText(t *testing.T) {
@@ -20,7 +20,7 @@ func TestProcessOneArchivesReadableText(t *testing.T) {
 		<p>第二段内容包含 &lt;unsafe&gt; 字样，但归档页面必须保持安全。</p></article></body></html>`
 
 	dataDir := t.TempDir()
-	data, err := store.Open(filepath.Join(dataDir, "links.db"))
+	data, err := store.Open(filepath.Join(dataDir, "pageglean.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
