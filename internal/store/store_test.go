@@ -77,6 +77,34 @@ func TestListBookmarksFiltersAndSearches(t *testing.T) {
 	}
 }
 
+func TestFTSPrefixSearchMatchesLatinTokenPrefixes(t *testing.T) {
+	s := newTestStore(t)
+	if !s.FTSEnabled() {
+		t.Skip("FTS5 is not enabled")
+	}
+
+	bookmark, _, err := s.CreateBookmark(context.Background(), Bookmark{
+		URL: "https://example.com/tome4", CanonicalURL: "https://example.com/tome4",
+		Title: "Tome4 guide",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteArchive(context.Background(), bookmark.ID, ArchiveContent{
+		Text: "A guide to Tome4", Path: "tome4", Hash: "tome4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := s.ListBookmarks(context.Background(), BookmarkFilter{Query: "tome", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != bookmark.ID {
+		t.Fatalf("unexpected prefix search results: %#v", items)
+	}
+}
+
 func TestAdminTokenRules(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

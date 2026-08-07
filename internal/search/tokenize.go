@@ -58,9 +58,22 @@ func Query(value string) string {
 	tokens := Tokens(value)
 	parts := make([]string, 0, len(tokens))
 	for _, token := range tokens {
-		parts = append(parts, `"`+strings.ReplaceAll(token, `"`, `""`)+`"`)
+		part := `"` + strings.ReplaceAll(token, `"`, `""`) + `"`
+		if isPrefixToken(token) {
+			part += `*`
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, " AND ")
+}
+
+func isPrefixToken(token string) bool {
+	for _, char := range token {
+		if unicode.Is(unicode.Han, char) {
+			return false
+		}
+	}
+	return token != ""
 }
 
 func SnippetNeedle(value string) string {
