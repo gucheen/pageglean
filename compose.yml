@@ -1,6 +1,7 @@
 services:
   pageglean:
     build: .
+    user: "${PAGEGLEAN_UID:-1000}:${PAGEGLEAN_GID:-1000}"
     restart: unless-stopped
     environment:
       PAGEGLEAN_ADDR: ":8080"

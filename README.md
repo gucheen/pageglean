@@ -91,8 +91,11 @@ node --check extension/options.js
 
 ```bash
 export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
+export PAGEGLEAN_UID=$(id -u)
+export PAGEGLEAN_GID=$(id -g)
+mkdir -p data
 docker compose up --build -d
 docker compose exec pageglean /app/pageglean admin setup-link
 ```
 
-反向代理负责 TLS。`PAGEGLEAN_PUBLIC_URL`、实际访问 Origin 和 Passkey RP ID 必须保持一致。
+镜像默认以非 root 用户 `10001:10001` 运行；Compose 会通过 `PAGEGLEAN_UID` 和 `PAGEGLEAN_GID` 对齐宿主机 `data/` 目录的所有者。反向代理负责 TLS。`PAGEGLEAN_PUBLIC_URL`、实际访问 Origin 和 Passkey RP ID 必须保持一致。

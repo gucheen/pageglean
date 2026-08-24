@@ -8,11 +8,22 @@
 
 ```bash
 export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
+export PAGEGLEAN_UID=$(id -u)
+export PAGEGLEAN_GID=$(id -g)
+mkdir -p data
 docker compose up --build -d
 docker compose exec pageglean /app/pageglean admin setup-link
 ```
 
-`data/` 是唯一需要持久化和备份的目录。不要把它放在临时文件系统中。
+镜像默认以非 root 用户 `10001:10001` 运行。Compose 使用 `PAGEGLEAN_UID` 和 `PAGEGLEAN_GID` 让进程匹配宿主机部署用户，因此 `data/` 应由该用户创建和管理。
+
+`data/` 是唯一需要持久化和备份的目录，不要把它放在临时文件系统中。如需挂载其他宿主机目录，必须确保上面设置的 UID/GID 可以写入该目录，例如：
+
+```bash
+sudo install -d -o "$PAGEGLEAN_UID" -g "$PAGEGLEAN_GID" -m 0750 /srv/pageglean/data
+```
+
+然后把 Compose 中的卷挂载改为 `/srv/pageglean/data:/data`。
 
 ## HTTPS 反向代理
 
