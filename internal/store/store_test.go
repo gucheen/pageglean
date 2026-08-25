@@ -32,6 +32,30 @@ func TestOwnerIsCreatedOnce(t *testing.T) {
 	}
 }
 
+func TestOpenConfiguresSQLite(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	var foreignKeys, busyTimeout, synchronous int
+	var journalMode string
+	for query, target := range map[string]any{
+		"PRAGMA foreign_keys": &foreignKeys,
+		"PRAGMA busy_timeout": &busyTimeout,
+		"PRAGMA journal_mode": &journalMode,
+		"PRAGMA synchronous":  &synchronous,
+	} {
+		if err := s.db.QueryRowContext(ctx, query).Scan(target); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	if foreignKeys != 1 || busyTimeout != 5000 || journalMode != "wal" || synchronous != 1 {
+		t.Fatalf("unexpected SQLite configuration: foreign_keys=%d busy_timeout=%d journal_mode=%q synchronous=%d", foreignKeys, busyTimeout, journalMode, synchronous)
+	}
+	if !s.FTSEnabled() {
+		t.Fatal("FTS5 is not enabled")
+	}
+}
+
 func TestCreateBookmarkDeduplicatesCanonicalURL(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
@@ -164,7 +188,7 @@ func TestExtensionPairingIsOneTimeAndCaptureOnly(t *testing.T) {
 
 func TestOpenMigratesStageOneBookmarkTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pageglean.db")
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}

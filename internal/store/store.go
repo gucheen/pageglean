@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 
 	searchindex "pageglean/internal/search"
 )
@@ -122,13 +122,13 @@ func Open(path string) (*Store, error) {
 	}
 	dsnURL := &url.URL{Scheme: "file", Path: path}
 	query := dsnURL.Query()
-	query.Set("_busy_timeout", "5000")
-	query.Set("_foreign_keys", "on")
-	query.Set("_journal_mode", "WAL")
-	query.Set("_synchronous", "NORMAL")
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "foreign_keys(ON)")
+	query.Add("_pragma", "journal_mode(WAL)")
+	query.Add("_pragma", "synchronous(NORMAL)")
 	dsnURL.RawQuery = query.Encode()
 
-	db, err := sql.Open("sqlite3", dsnURL.String())
+	db, err := sql.Open("sqlite", dsnURL.String())
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}

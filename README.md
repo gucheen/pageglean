@@ -22,11 +22,12 @@
 Passkey 在 `localhost` 可以使用 HTTP；正式部署必须使用 HTTPS 和稳定域名。
 
 ```bash
+export CGO_ENABLED=0
 export PAGEGLEAN_PUBLIC_URL=http://localhost:8080
 export PAGEGLEAN_DATA_DIR=./data
 
-go run -tags sqlite_fts5 ./cmd/pageglean admin setup-link
-go run -tags sqlite_fts5 ./cmd/pageglean serve
+go run ./cmd/pageglean admin setup-link
+go run ./cmd/pageglean serve
 ```
 
 打开 `admin setup-link` 输出的一次性地址，注册第一个 Passkey。
@@ -39,22 +40,22 @@ go run -tags sqlite_fts5 ./cmd/pageglean serve
 | `PAGEGLEAN_DATA_DIR` | `./data` | SQLite、归档 Blob 数据目录 |
 | `PAGEGLEAN_ALLOW_PRIVATE_FETCH` | `false` | 是否允许后台抓取私网/本机 URL |
 
-不带 `sqlite_fts5` 构建标签时应用仍可运行，但会回退到基础 `LIKE` 检索。正式构建和 Docker 镜像默认启用 FTS5。
+SQLite 由纯 Go 的 `modernc.org/sqlite` 驱动提供，无需启用 CGO；FTS5 全文检索默认可用。
 
 ## 管理命令
 
 ```bash
 # 首次初始化
-go run -tags sqlite_fts5 ./cmd/pageglean admin setup-link --ttl 10m
+CGO_ENABLED=0 go run ./cmd/pageglean admin setup-link --ttl 10m
 
 # Passkey 丢失后的恢复入口
-go run -tags sqlite_fts5 ./cmd/pageglean admin recovery-link --ttl 10m
+CGO_ENABLED=0 go run ./cmd/pageglean admin recovery-link --ttl 10m
 
 # 创建完整备份，已存在的目标文件不会被覆盖
-go run -tags sqlite_fts5 ./cmd/pageglean admin backup --output pageglean-backup.tar.gz
+CGO_ENABLED=0 go run ./cmd/pageglean admin backup --output pageglean-backup.tar.gz
 
 # 只读校验备份格式和 SQLite 快照
-go run -tags sqlite_fts5 ./cmd/pageglean admin verify-backup --input pageglean-backup.tar.gz
+CGO_ENABLED=0 go run ./cmd/pageglean admin verify-backup --input pageglean-backup.tar.gz
 ```
 
 ## Chromium 扩展
@@ -78,9 +79,9 @@ go run -tags sqlite_fts5 ./cmd/pageglean admin verify-backup --input pageglean-b
 ## 测试与构建
 
 ```bash
-go test -tags sqlite_fts5 ./...
-go vet -tags sqlite_fts5 ./...
-go build -tags sqlite_fts5 ./cmd/pageglean
+CGO_ENABLED=0 go test ./...
+CGO_ENABLED=0 go vet ./...
+CGO_ENABLED=0 go build ./cmd/pageglean
 
 node --check extension/service-worker.js
 node --check extension/popup.js

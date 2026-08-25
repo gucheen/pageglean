@@ -4,7 +4,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=1 go build -tags sqlite_fts5 -trimpath -ldflags="-s -w" -o /out/pageglean ./cmd/pageglean
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/pageglean ./cmd/pageglean
 
 FROM debian:bookworm-slim
 
