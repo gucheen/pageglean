@@ -89,6 +89,14 @@ node --check extension/options.js
 
 ## Docker
 
+预构建的 `linux/amd64` 镜像发布在 GHCR：
+
+```bash
+docker pull ghcr.io/gucheen/pageglean:latest
+```
+
+`main` 分支会发布 `latest`、`main` 和提交 SHA 标签；`v*` Git 标签会额外发布对应的语义化版本标签。
+
 ```bash
 export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
 export PAGEGLEAN_UID=$(id -u)
