@@ -308,3 +308,16 @@ a { color: inherit; }
 }
 
 .notification-actions { display: flex; gap: 16px; }
+
+.public-page .brand { text-decoration: none; }
+.public-heading { padding: 22px 0 16px; }
+.public-heading h1 { margin: 0; font-size: 20px; }
+.public-heading p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; }
+.public-page .bookmark-row { padding: 14px 0; }
+.public-page .bookmark-row h2 { margin: 0; font-size: inherit; }
+.public-description, .public-comment { margin: 6px 0 0; font-size: 13px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.public-description { color: var(--muted); }
+.public-comment-label { color: var(--accent-dark); margin-right: 8px; font-size: 12px; }
+.public-pagination { display: flex; align-items: center; justify-content: center; gap: 24px; padding: 24px 0; font-size: 13px; }
+.public-pagination a { padding: 10px 0; color: #285b87; }
+.public-links { display: flex; flex-wrap: wrap; gap: 16px; }

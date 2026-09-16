@@ -8,17 +8,12 @@
     <title>拾页 · PageGlean</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body>
-    <div id="loadingView" class="center-shell">
-      <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
-      <p class="muted">正在打开你的网页记忆库…</p>
-    </div>
-
-    <main id="authView" class="center-shell" hidden>
+  <body data-authenticated="{{.Authenticated}}" data-setup-required="{{.SetupRequired}}">
+    <main id="authView" class="center-shell" {{if .Authenticated}}hidden{{end}}>
       <section class="auth-card">
         <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
         <h1 id="authTitle">用 Passkey 登录</h1>
-        <p id="authDescription" class="auth-description">你的书签保持私密，只能通过已注册的 Passkey 访问。</p>
+        <p id="authDescription" class="auth-description">登录后管理全部书签；只有你主动公开的书签可供访客查看。</p>
         <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
         <div id="setupHelp" class="setup-help" hidden>
           <p>应用尚未初始化。请先在服务器执行：</p>
@@ -27,10 +22,11 @@
         </div>
         <p id="authError" class="form-error" role="alert"></p>
       </section>
+      <a class="text-button" href="/public/">浏览公开书签</a>
       <p class="auth-footnote">单用户 · 自托管 · 数据可迁移</p>
     </main>
 
-    <div id="appView" class="app-shell" hidden>
+    <div id="appView" class="app-shell" {{if not .ShowApp}}hidden{{end}}>
       <header class="topbar">
         <div class="brand">拾页</div>
         <label class="search-box">
@@ -86,7 +82,7 @@
       </main>
     </div>
 
-    <section id="captureView" class="capture-page" hidden>
+    <section id="captureView" class="capture-page" {{if not .ShowCapture}}hidden{{end}}>
       <header class="capture-heading"><a href="/" class="brand">拾页</a><span>添加书签</span></header>
       <section id="captureSuccess" class="capture-success" role="status" hidden>
         <h1>链接已保存</h1>
@@ -156,8 +152,8 @@
       </section>
       <div class="settings-section">
         <h3>公开书签与通知</h3>
-        <p class="form-hint">公开接口展示最新收藏的六条公开书签。取消公开后接口立即更新，外部展示的更新取决于接收方。</p>
-        <a class="bookmarklet-link" href="/public/bookmarks.json" target="_blank" rel="noopener">查看公开 JSON</a>
+        <p class="form-hint">公开页面可浏览全部公开书签，JSON 接口提供最新六条。取消公开后立即更新，外部展示的更新取决于接收方。</p>
+        <div class="public-links"><a class="bookmarklet-link" href="/public/" target="_blank" rel="noopener">浏览公开书签</a><a class="bookmarklet-link" href="/public/bookmarks.json" target="_blank" rel="noopener">查看公开 JSON</a></div>
         <p id="publicationStatus" class="form-hint" role="status">正在读取通知状态…</p>
         <div class="notification-actions"><button id="retryPublicationButton" class="text-button" type="button" disabled>发送更新通知</button><button id="refreshPublicationButton" class="text-button" type="button">刷新状态</button></div>
       </div>

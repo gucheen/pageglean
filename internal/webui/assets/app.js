@@ -12,7 +12,6 @@ const state = {
 };
 
 const $ = (selector) => document.querySelector(selector);
-const loadingView = $("#loadingView");
 const authView = $("#authView");
 const appView = $("#appView");
 const authButton = $("#authButton");
@@ -156,8 +155,10 @@ function setButtonBusy(button, busy, label) {
 
 async function init() {
   try {
-    const status = await request("/api/status");
-    loadingView.hidden = true;
+    const status = {
+      authenticated: document.body.dataset.authenticated === "true",
+      setupRequired: document.body.dataset.setupRequired === "true",
+    };
     if (status.authenticated) {
       showApp();
       await loadBookmarks();
@@ -165,7 +166,7 @@ async function init() {
     }
     showAuth(status);
   } catch (error) {
-    loadingView.querySelector("p").textContent = error.message;
+    showToast(error.message);
   }
 }
 
@@ -189,7 +190,7 @@ function showAuth(status) {
     setupHelp.hidden = false;
   } else {
     $("#authTitle").textContent = "用 Passkey 登录";
-    $("#authDescription").textContent = "你的书签保持私密，只能通过已注册的 Passkey 访问。";
+    $("#authDescription").textContent = "登录后管理全部书签；只有你主动公开的书签可供访客查看。";
     authButton.textContent = "使用 Passkey";
     authButton.hidden = false;
     setupHelp.hidden = true;
@@ -198,7 +199,6 @@ function showAuth(status) {
 }
 
 function showApp() {
-  loadingView.hidden = true;
   authView.hidden = true;
   appView.hidden = state.capture;
   if (state.capture) showCaptureForm();

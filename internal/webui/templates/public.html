@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>公开书签 · 拾页</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell public-page">
+    <header class="topbar">
+      <a class="brand" href="/public/">拾页</a>
+    </header>
+    <main class="content">
+      <div class="public-heading"><h1>公开书签</h1><p class="muted">一些值得保存与分享的链接，按收藏时间排列。</p></div>
+      <section class="bookmark-list" aria-label="公开书签列表">
+        {{range .Bookmarks}}
+        <article class="bookmark-row">
+          <h2><a class="bookmark-title" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></h2>
+          <div class="bookmark-meta"><span class="bookmark-domain">{{domain .URL}}</span><span>·</span><time datetime="{{.SavedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.SavedAt.Format "2006-01-02"}}</time></div>
+          {{if .Description}}<p class="public-description">{{.Description}}</p>{{end}}
+          {{if .PublicComment}}<p class="public-comment"><span class="public-comment-label">短评</span>{{.PublicComment}}</p>{{end}}
+        </article>
+        {{else}}
+        <div class="empty-state"><h2>还没有公开书签</h2><p>有值得分享的链接时，会出现在这里。</p></div>
+        {{end}}
+      </section>
+      {{if or .Previous .Next}}<nav class="public-pagination" aria-label="书签分页">
+        {{if .Previous}}<a href="/public/?page={{.Previous}}">上一页</a>{{end}}
+        <span class="muted">第 {{.Page}} 页</span>
+        {{if .Next}}<a href="/public/?page={{.Next}}">下一页</a>{{end}}
+      </nav>{{end}}
+    </main>
+  </div>
+</body>
+</html>

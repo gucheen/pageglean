@@ -81,6 +81,7 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.handleHealth)
 	mux.HandleFunc("GET /public/bookmarks.json", a.handlePublicFeed)
+	mux.HandleFunc("GET /public/{$}", a.handlePublicBookmarks)
 	mux.Handle("GET /api/publication", a.requireAuth(http.HandlerFunc(a.handlePublicationStatus)))
 	mux.Handle("POST /api/publication/retry", a.requireAuth(http.HandlerFunc(a.handlePublicationRetry)))
 	mux.HandleFunc("GET /api/status", a.handleStatus)
@@ -113,7 +114,12 @@ func (a *App) routes() http.Handler {
 			return
 		}
 		if r.URL.Path != "/" && r.URL.Path != "/index.html" && !strings.Contains(r.URL.Path, ".") {
-			r.URL.Path = "/"
+			a.handleIndex(w, r)
+			return
+		}
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			a.handleIndex(w, r)
+			return
 		}
 		static.ServeHTTP(w, r)
 	}))

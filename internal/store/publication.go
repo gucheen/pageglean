@@ -30,28 +30,9 @@ type publicationQuery interface {
 
 func publicFeed(ctx context.Context, db publicationQuery) (PublicFeed, error) {
 	feed := PublicFeed{Version: 1, Bookmarks: []PublicBookmark{}}
-	rows, err := db.QueryContext(ctx, `SELECT url, title, description, public_comment, created_at
-		FROM bookmarks WHERE is_public = 1 ORDER BY created_at DESC, id DESC LIMIT 6`)
+	var err error
+	feed.Bookmarks, err = publicBookmarks(ctx, db, 6, 0)
 	if err != nil {
-		return feed, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var item PublicBookmark
-		var savedAt string
-		if err := rows.Scan(&item.URL, &item.Title, &item.Description, &item.PublicComment, &savedAt); err != nil {
-			return feed, err
-		}
-		item.SavedAt, err = parseTime(savedAt)
-		if err != nil {
-			return feed, err
-		}
-		if item.Title == "" {
-			item.Title = item.URL
-		}
-		feed.Bookmarks = append(feed.Bookmarks, item)
-	}
-	if err := rows.Err(); err != nil {
 		return feed, err
 	}
 	encoded, err := json.Marshal(feed)
@@ -65,4 +46,37 @@ func publicFeed(ctx context.Context, db publicationQuery) (PublicFeed, error) {
 
 func (s *Store) PublicFeed(ctx context.Context) (PublicFeed, error) {
 	return publicFeed(ctx, s.db)
+}
+
+func publicBookmarks(ctx context.Context, db publicationQuery, limit, offset int) ([]PublicBookmark, error) {
+	items := []PublicBookmark{}
+	rows, err := db.QueryContext(ctx, `SELECT url, title, description, public_comment, created_at
+		FROM bookmarks WHERE is_public = 1 ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item PublicBookmark
+		var savedAt string
+		if err := rows.Scan(&item.URL, &item.Title, &item.Description, &item.PublicComment, &savedAt); err != nil {
+			return nil, err
+		}
+		item.SavedAt, err = parseTime(savedAt)
+		if err != nil {
+			return nil, err
+		}
+		if item.Title == "" {
+			item.Title = item.URL
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) PublicBookmarks(ctx context.Context, limit, offset int) ([]PublicBookmark, error) {
+	return publicBookmarks(ctx, s.db, limit, offset)
 }
