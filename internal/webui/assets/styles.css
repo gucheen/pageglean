@@ -222,16 +222,8 @@ a { color: inherit; }
 .settings-dialog { padding: 24px; }
 .settings-dialog .dialog-heading { margin-bottom: 12px; }
 .settings-copy { margin: 0 0 20px; color: var(--muted); font-size: 14px; line-height: 1.65; }
-.pairing-code-view { display: grid; gap: 5px; margin-bottom: 14px; padding: 16px; border: 1px dashed #e2b9aa; border-radius: 9px; background: var(--accent-soft); }
-.pairing-code-view span, .pairing-code-view small { color: var(--muted); font-size: 12px; }
-.pairing-code-view strong { color: var(--accent-dark); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 30px; letter-spacing: .12em; }
 .settings-section { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
 .settings-section h3 { margin: 0 0 12px; font-size: 14px; }
-.client-list { display: grid; gap: 8px; }
-.client-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-strong); }
-.client-row strong { display: block; font-size: 13px; }
-.client-row small { color: var(--muted); font-size: 11px; }
-.client-empty { color: var(--muted); font-size: 13px; }
 .storage-stats { color: var(--muted); font-size: 13px; line-height: 1.7; }
 .storage-stats strong { color: var(--ink); }
 .export-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -283,3 +275,19 @@ a { color: inherit; }
   .mapping-fields { grid-template-columns: 1fr; }
   .auth-card { padding: 30px 24px; }
 }
+
+.bookmarklet-settings { margin-bottom: 20px; }
+.bookmarklet-settings h3 { margin: 0 0 10px; font-size: 15px; }
+.bookmarklet-link { color: #285b87; cursor: grab; text-decoration: underline; text-underline-offset: 3px; }
+.form-hint, .archive-choice small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.archive-choice { margin-top: 16px; align-items: start; }
+.archive-choice small { display: block; }
+.capture-page { max-width: 700px; margin: 0 auto; padding: 20px; }
+.capture-heading { display: flex; align-items: center; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.capture-heading a { text-decoration: none; }
+.capture-heading span { font-size: 14px; color: var(--muted); }
+.capture-form { position: static; width: 100%; max-width: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; }
+.capture-form form { padding: 20px 0; }
+.capture-form .dialog-heading { display: none; }
+.capture-success { padding-top: 24px; }
+.capture-success h1 { font-size: 20px; }

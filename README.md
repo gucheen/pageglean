@@ -5,8 +5,7 @@
 核心能力：
 
 - Passkey-only 初始化、登录与 CLI 恢复
-- Chromium Manifest V3 扩展一键保存
-- `activeTab` 临时页面权限和 capture-only 扩展 Token
+- 书签栏快捷方式与独立添加页面，预填网址、标题和选中文字
 - 受资源限制的后台正文提取与 gzip Blob 归档
 - SQLite FTS5、中文二元词和中英文混合检索
 - 标签、稍后阅读、收藏与归档阅读模式
@@ -58,15 +57,11 @@ CGO_ENABLED=0 go run ./cmd/pageglean admin backup --output pageglean-backup.tar.
 CGO_ENABLED=0 go run ./cmd/pageglean admin verify-backup --input pageglean-backup.tar.gz
 ```
 
-## Chromium 扩展
+## 书签栏快捷方式
 
-开发阶段从 `chrome://extensions` 加载 [extension](extension) 目录。然后：
+在“设置 → 书签栏快捷方式”中，把“保存到拾页”拖到浏览器书签栏。浏览网页时点击它，会打开独立的添加页面，预填网址、标题和选中文字（备注）。保存前可以修改网址、标题、备注、标签，以及稍后阅读、星标和正文归档选项。
 
-1. 在拾页网页打开“设置 → 浏览器扩展”。
-2. 生成 10 分钟有效的配对码。
-3. 在扩展“连接设置”中填写拾页地址和配对码。
-
-扩展支持工具栏弹窗、`Command/Ctrl + Shift + S` 和右键菜单。默认只提交 URL、标题、canonical URL 和选中文字；只有明确勾选“归档当前正文”时才读取并上传当前页面正文。
+未登录时先完成 Passkey 登录，预填内容会保留。归档选项由服务器抓取公开网页，不包含浏览器的登录状态。部分浏览器内置页面或受限制的网站无法运行书签脚本，可直接打开 `/add` 手动填写。
 
 ## 导入与批量整理
 
@@ -83,9 +78,7 @@ CGO_ENABLED=0 go test ./...
 CGO_ENABLED=0 go vet ./...
 CGO_ENABLED=0 go build ./cmd/pageglean
 
-node --check extension/service-worker.js
-node --check extension/popup.js
-node --check extension/options.js
+node --check internal/webui/assets/app.js
 ```
 
 ## Docker

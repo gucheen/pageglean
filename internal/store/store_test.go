@@ -151,41 +151,6 @@ func TestAdminTokenRules(t *testing.T) {
 	}
 }
 
-func TestExtensionPairingIsOneTimeAndCaptureOnly(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	code, expires, err := s.CreateExtensionPairing(ctx, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !expires.After(time.Now()) {
-		t.Fatal("pairing code is already expired")
-	}
-	token, err := s.RedeemExtensionPairing(ctx, code, "My Chromium")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.ValidateCaptureToken(ctx, token); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.RedeemExtensionPairing(ctx, code, "Second client"); err == nil {
-		t.Fatal("pairing code was accepted twice")
-	}
-	clients, err := s.ListExtensionClients(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(clients) != 1 || clients[0].Label != "My Chromium" {
-		t.Fatalf("unexpected clients: %#v", clients)
-	}
-	if err := s.RevokeExtensionClient(ctx, clients[0].ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.ValidateCaptureToken(ctx, token); err == nil {
-		t.Fatal("revoked token remained valid")
-	}
-}
-
 func TestOpenMigratesStageOneBookmarkTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pageglean.db")
 	db, err := sql.Open("sqlite", path)

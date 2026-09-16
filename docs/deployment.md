@@ -48,7 +48,7 @@ Passkey 与域名绑定。正式初始化后不要随意修改 `PAGEGLEAN_PUBLIC
 export PAGEGLEAN_ALLOW_PRIVATE_FETCH=true
 ```
 
-开启后，任何能创建书签的扩展 Token 都可能促使服务器访问内网 URL，因此应及时撤销丢失设备。
+开启后，已登录用户保存的链接可能促使服务器访问内网 URL，请仅在需要归档内网内容时启用。
 
 ## 备份
 

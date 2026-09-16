@@ -36,42 +36,6 @@ func newTestApp(t *testing.T) (*App, *store.Store) {
 	return application, data
 }
 
-func TestCaptureAcceptsPairedExtensionToken(t *testing.T) {
-	application, data := newTestApp(t)
-	code, _, err := data.CreateExtensionPairing(t.Context(), time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := data.RedeemExtensionPairing(t.Context(), code, "Test Chromium")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := bytes.NewBufferString(`{"url":"https://example.com/article","title":"Extension capture"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/capture", body)
-	request.Header.Set("Origin", "chrome-extension://abcdefghijklmnop")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	response := httptest.NewRecorder()
-	application.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "chrome-extension://abcdefghijklmnop" {
-		t.Fatalf("Access-Control-Allow-Origin = %q", got)
-	}
-}
-
-func TestExtensionPreflightIsLimitedToCaptureRoutes(t *testing.T) {
-	application, _ := newTestApp(t)
-	request := httptest.NewRequest(http.MethodOptions, "/api/capture", nil)
-	request.Header.Set("Origin", "chrome-extension://abcdefghijklmnop")
-	response := httptest.NewRecorder()
-	application.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("status = %d", response.Code)
-	}
-}
-
 func TestStatusReportsSetupRequired(t *testing.T) {
 	application, _ := newTestApp(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
@@ -246,5 +210,94 @@ func TestAuthenticatedBulkUpdate(t *testing.T) {
 	}
 	if !updated.Unread || len(updated.Tags) != 1 || updated.Tags[0] != "批量" {
 		t.Fatalf("unexpected bulk update: %#v", updated)
+	}
+}
+
+func TestBookmarkletPageAndArchiveChoice(t *testing.T) {
+	for _, tc := range []struct{ name, archive, status string }{
+		{"link only", `,"archive":false`, "idle"},
+		{"archive requested", `,"archive":true`, "pending"},
+		{"existing clients", "", "pending"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			application, data := newTestApp(t)
+			page := httptest.NewRecorder()
+			application.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/add", nil))
+			if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `id="captureView"`) {
+				t.Fatalf("add page: %d", page.Code)
+			}
+			token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := `{"url":"https://example.com/bookmarklet","title":"Edited title","note":"Selected text","tags":["中文"],"unread":true,"starred":true` + tc.archive + `}`
+			unauth := httptest.NewRecorder()
+			application.Handler().ServeHTTP(unauth, httptest.NewRequest(http.MethodPost, "/api/bookmarks", strings.NewReader(body)))
+			if unauth.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated save: %d", unauth.Code)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/bookmarks", strings.NewReader(body))
+			request.Header.Set("Origin", "http://localhost:8080")
+			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+			response := httptest.NewRecorder()
+			application.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusCreated {
+				t.Fatalf("save: %d %s", response.Code, response.Body.String())
+			}
+			items, err := data.ListBookmarks(t.Context(), store.BookmarkFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("bookmarks: %d", len(items))
+			}
+			got := items[0]
+			if got.Title != "Edited title" || got.Note != "Selected text" || !got.Unread || !got.Starred || len(got.Tags) != 1 || got.Tags[0] != "中文" || got.ArchiveStatus != tc.status {
+				t.Fatalf("saved bookmark: %#v", got)
+			}
+			job, err := data.ClaimArchiveJob(t.Context())
+			if tc.status == "idle" {
+				if err != store.ErrNotFound {
+					t.Fatalf("unexpected archive job: %#v, %v", job, err)
+				}
+			} else if err != nil || job.BookmarkID != got.ID {
+				t.Fatalf("missing archive job: %#v, %v", job, err)
+			}
+		})
+	}
+}
+
+func TestRemovedExtensionRoutesRejectRequests(t *testing.T) {
+	application, data := newTestApp(t)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/api/capture"},
+		{http.MethodPost, "/api/extension/pair"},
+		{http.MethodPost, "/api/extension/pairings"},
+		{http.MethodGet, "/api/extension/clients"},
+		{http.MethodDelete, "/api/extension/clients/1"},
+		{http.MethodOptions, "/api/capture"},
+	} {
+		for _, origin := range []string{"http://localhost:8080", "chrome-extension://abcdefghijklmnop"} {
+			request := httptest.NewRequest(route.method, route.path, strings.NewReader(`{"url":"https://example.com"}`))
+			request.Header.Set("Origin", origin)
+			request.Header.Set("Authorization", "Bearer pageglean_cap_"+strings.Repeat("x", 43))
+			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+			response := httptest.NewRecorder()
+			application.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden && response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("%s %s (%s): %d", route.method, route.path, origin, response.Code)
+			}
+			if response.Header().Get("Access-Control-Allow-Origin") != "" {
+				t.Fatal("removed route allowed CORS")
+			}
+		}
+	}
+	items, err := data.ListBookmarks(t.Context(), store.BookmarkFilter{})
+	if err != nil || len(items) != 0 {
+		t.Fatalf("unexpected bookmarks: %#v, %v", items, err)
 	}
 }

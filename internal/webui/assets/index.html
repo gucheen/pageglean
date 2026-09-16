@@ -85,6 +85,15 @@
       </main>
     </div>
 
+    <section id="captureView" class="capture-page" hidden>
+      <header class="capture-heading"><a href="/" class="brand">拾页</a><span>添加书签</span></header>
+      <section id="captureSuccess" class="capture-success" role="status" hidden>
+        <h1>链接已保存</h1>
+        <p id="captureResult"></p>
+        <p><a href="/">查看书签</a> · <button id="closeCaptureButton" class="text-button" type="button">关闭窗口</button></p>
+      </section>
+    </section>
+
     <dialog id="bookmarkDialog" class="dialog">
       <form id="bookmarkForm" method="dialog">
         <div class="dialog-heading">
@@ -114,6 +123,8 @@
           <label class="check"><input id="unreadInput" type="checkbox"><span>稍后阅读</span></label>
           <label class="check"><input id="starredInput" type="checkbox"><span>星标</span></label>
         </div>
+        <label class="check archive-choice" id="archiveChoice"><input id="archiveInput" type="checkbox"><span>归档网页正文 <small>由服务器抓取公开网页，不包含当前浏览器的登录状态</small></span></label>
+        <p class="form-hint">书签仅自己可见。</p>
         <p id="dialogError" class="form-error" role="alert"></p>
         <div class="dialog-actions">
           <button id="cancelDialogButton" class="button button-ghost" type="button">取消</button>
@@ -125,21 +136,16 @@
     <dialog id="settingsDialog" class="dialog settings-dialog">
       <div class="dialog-heading">
         <div>
-          <h2>浏览器扩展</h2>
+          <h2>设置</h2>
         </div>
         <button id="closeSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
       </div>
-      <p class="settings-copy">生成一个 10 分钟有效的配对码，在 Chromium 扩展的连接设置中输入。</p>
-      <div id="pairingCodeView" class="pairing-code-view" hidden>
-        <span>配对码</span>
-        <strong id="pairingCode"></strong>
-        <small id="pairingExpiry"></small>
-      </div>
-      <button id="generatePairingButton" class="button button-primary" type="button">生成配对码</button>
-      <div class="settings-section">
-        <h3>已连接设备</h3>
-        <div id="extensionClients" class="client-list"></div>
-      </div>
+      <section class="bookmarklet-settings">
+        <h3>书签栏快捷方式</h3>
+        <p class="settings-copy">把下面的链接拖到浏览器书签栏。浏览网页时点击它，即可修改网址、标题、备注和标签后保存。</p>
+        <a id="bookmarkletLink" class="bookmarklet-link" draggable="true">保存到拾页</a>
+        <p class="form-hint">选中的文字会填入备注；未登录时先登录，待保存内容会保留。</p>
+      </section>
       <div class="settings-section">
         <h3>数据与存储</h3>
         <div id="storageStats" class="storage-stats">正在读取…</div>

@@ -94,24 +94,6 @@ func (a *Archiver) ProcessOne(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-func (a *Archiver) StoreClientText(ctx context.Context, bookmarkID int64, title, value string) error {
-	text := truncateUTF8(normalizeText(value), maxTextBytes)
-	if text == "" {
-		return fmt.Errorf("no readable text supplied")
-	}
-	fragment := buildSafeFragment(title, "", text)
-	hashBytes := sha256.Sum256([]byte(fragment))
-	hash := hex.EncodeToString(hashBytes[:])
-	relative := filepath.Join("blobs", hash[:2], hash+".html.gz")
-	if err := a.writeCompressed(relative, []byte(fragment)); err != nil {
-		return err
-	}
-	return a.store.CompleteArchive(ctx, bookmarkID, store.ArchiveContent{
-		Title: strings.TrimSpace(title), Text: text,
-		Path: filepath.ToSlash(relative), Hash: hash,
-	})
-}
-
 func (a *Archiver) fetchAndStore(ctx context.Context, value string) (store.ArchiveContent, error) {
 	pageURL, err := url.Parse(value)
 	if err != nil {

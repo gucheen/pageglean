@@ -10,6 +10,7 @@ import (
 )
 
 type createBookmarkRequest struct {
+	Archive *bool    `json:"archive"`
 	URL     string   `json:"url"`
 	Title   string   `json:"title"`
 	Note    string   `json:"note"`
@@ -56,6 +57,7 @@ func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
 		Tags:         input.Tags,
 		Unread:       input.Unread,
 		Starred:      input.Starred,
+		SkipArchive:  input.Archive != nil && !*input.Archive,
 	})
 	if err != nil {
 		a.internalError(w, r, err)

@@ -4,6 +4,8 @@ const state = {
   bookmarks: [],
   selected: new Set(),
   selecting: false,
+  capture: location.pathname === "/add",
+  captureInitialized: false,
   importFile: null,
   importMapping: {},
   setupToken: new URLSearchParams(location.search).get("token") || "",
@@ -18,6 +20,8 @@ const authError = $("#authError");
 const bookmarkDialog = $("#bookmarkDialog");
 const settingsDialog = $("#settingsDialog");
 const importDialog = $("#importDialog");
+const captureView = $("#captureView");
+const captureParams = new URLSearchParams(location.hash.slice(1) || location.search);
 let searchTimer;
 let toastTimer;
 let importPreviewVersion = 0;
@@ -30,7 +34,11 @@ async function request(path, options = {}) {
   const response = await fetch(path, { ...options, headers });
   if (response.status === 204) return null;
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
+  if (!response.ok) {
+    const error = new Error(payload.error || `请求失败（${response.status}）`);
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 
@@ -163,6 +171,8 @@ async function init() {
 
 function showAuth(status) {
   appView.hidden = true;
+  captureView.hidden = true;
+  if (bookmarkDialog.open) bookmarkDialog.close();
   authView.hidden = false;
   const setupHelp = $("#setupHelp");
   if (state.setupToken) {
@@ -190,10 +200,12 @@ function showAuth(status) {
 function showApp() {
   loadingView.hidden = true;
   authView.hidden = true;
-  appView.hidden = false;
+  appView.hidden = state.capture;
+  if (state.capture) showCaptureForm();
 }
 
 async function loadBookmarks() {
+  if (state.capture) return;
   const params = new URLSearchParams();
   if (state.query) params.set("q", state.query);
   if (state.filter) params.set("state", state.filter);
@@ -366,6 +378,7 @@ function openCreateDialog() {
   $("#urlField").hidden = false;
   $("#urlInput").disabled = false;
   $("#dialogError").textContent = "";
+  $("#archiveChoice").hidden = false;
   bookmarkDialog.showModal();
   $("#urlInput").focus();
 }
@@ -374,6 +387,7 @@ function openEditDialog(bookmark) {
   $("#bookmarkForm").reset();
   $("#bookmarkId").value = bookmark.id;
   $("#dialogTitle").textContent = "编辑书签";
+  $("#archiveChoice").hidden = true;
   $("#urlField").hidden = true;
   $("#urlInput").disabled = true;
   $("#titleInput").value = bookmark.title;
@@ -396,7 +410,10 @@ async function submitBookmark(event) {
     unread: $("#unreadInput").checked,
     starred: $("#starredInput").checked,
   };
-  if (!id) payload.url = $("#urlInput").value;
+  if (!id) {
+    payload.url = $("#urlInput").value;
+    payload.archive = $("#archiveInput").checked;
+  }
   setButtonBusy($("#saveButton"), true, "保存中…");
   $("#dialogError").textContent = "";
   try {
@@ -405,9 +422,22 @@ async function submitBookmark(event) {
       body: JSON.stringify(payload),
     });
     bookmarkDialog.close();
+    if (state.capture) {
+      $("#captureSuccess").hidden = false;
+      $("#captureResult").textContent = result?.duplicate
+        ? "这个链接已经保存过，已按重复链接规则合并。可以关闭此窗口继续浏览。"
+        : "可以关闭此窗口，继续浏览原网页。";
+      history.replaceState({}, "", "/add");
+      window.close();
+      return;
+    }
     showToast(result?.duplicate ? "这个链接已经保存过" : id ? "书签已更新" : "链接已保存");
     await loadBookmarks();
   } catch (error) {
+    if (state.capture && error.status === 401) {
+      showAuth(await request("/api/status"));
+      return;
+    }
     $("#dialogError").textContent = error.message;
   } finally {
     setButtonBusy($("#saveButton"), false, "保存");
@@ -444,10 +474,46 @@ async function retryArchive(id) {
   }
 }
 
+function showCaptureForm() {
+  captureView.hidden = false;
+  if (!state.captureInitialized) {
+    captureView.append(bookmarkDialog);
+    bookmarkDialog.classList.add("capture-form");
+    $("#bookmarkForm").reset();
+    $("#urlInput").value = captureParams.get("url") || "";
+    $("#titleInput").value = captureParams.get("title") || "";
+    $("#noteInput").value = captureParams.get("note") || "";
+    $("#tagsInput").value = captureParams.get("tags") || "";
+    $("#unreadInput").checked = captureParams.get("unread") === "1";
+    $("#starredInput").checked = captureParams.get("starred") === "1";
+    state.captureInitialized = true;
+  }
+  bookmarkDialog.show();
+  $("#urlInput").focus();
+}
+
+function cancelBookmark() {
+  if (state.capture) {
+    window.close();
+    location.assign("/");
+    return;
+  }
+  bookmarkDialog.close();
+}
+
+function configureBookmarklet() {
+  const destination = JSON.stringify(`${location.origin}/add`);
+  const code = `javascript:void(function(){var p=new URLSearchParams({url:location.href,title:document.title,note:String(window.getSelection()||"").slice(0,2000)});window.open(${destination}+"#"+p.toString(),"_blank","popup,width=720,height=760,noopener,noreferrer");}())`;
+  $("#bookmarkletLink").href = code;
+  $("#bookmarkletLink").addEventListener("click", (event) => {
+    event.preventDefault();
+    showToast("请把“保存到拾页”拖到浏览器书签栏，再在要保存的网页上使用。");
+  });
+}
+
 async function openSettings() {
-  $("#pairingCodeView").hidden = true;
   settingsDialog.showModal();
-  await Promise.all([loadExtensionClients(), loadStorageStats()]);
+  await loadStorageStats();
 }
 
 async function loadStorageStats() {
@@ -469,52 +535,6 @@ function formatBytes(value) {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
-}
-
-async function loadExtensionClients() {
-  const container = $("#extensionClients");
-  container.textContent = "正在读取…";
-  try {
-    const result = await request("/api/extension/clients");
-    container.replaceChildren();
-    if (!result.clients.length) {
-      container.append(element("p", "client-empty", "还没有连接浏览器扩展。"));
-      return;
-    }
-    for (const client of result.clients) {
-      const row = element("div", "client-row");
-      const info = element("div");
-      info.append(element("strong", "", client.label));
-      const used = client.lastUsedAt ? `最后使用：${formatDate(client.lastUsedAt)}` : `连接于：${formatDate(client.createdAt)}`;
-      info.append(element("small", "", used));
-      const revoke = element("button", "text-button danger", "撤销");
-      revoke.type = "button";
-      revoke.addEventListener("click", async () => {
-        if (!confirm(`撤销“${client.label}”的扩展访问权限？`)) return;
-        await request(`/api/extension/clients/${client.id}`, { method: "DELETE" });
-        await loadExtensionClients();
-      });
-      row.append(info, revoke);
-      container.append(row);
-    }
-  } catch (error) {
-    container.textContent = error.message;
-  }
-}
-
-async function generatePairingCode() {
-  const button = $("#generatePairingButton");
-  setButtonBusy(button, true, "生成中…");
-  try {
-    const result = await request("/api/extension/pairings", { method: "POST" });
-    $("#pairingCode").textContent = result.code;
-    $("#pairingExpiry").textContent = `有效期至 ${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(result.expiresAt))}`;
-    $("#pairingCodeView").hidden = false;
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    setButtonBusy(button, false, "生成配对码");
-  }
 }
 
 function openImportDialog() {
@@ -638,7 +658,6 @@ function showToast(message) {
 $("#addButton").addEventListener("click", openCreateDialog);
 $("#settingsButton").addEventListener("click", openSettings);
 $("#closeSettingsButton").addEventListener("click", () => settingsDialog.close());
-$("#generatePairingButton").addEventListener("click", generatePairingCode);
 $("#openImportButton").addEventListener("click", openImportDialog);
 $("#closeImportButton").addEventListener("click", () => importDialog.close());
 $("#cancelImportButton").addEventListener("click", () => importDialog.close());
@@ -649,8 +668,9 @@ $("#importFile").addEventListener("change", (event) => {
   if (state.importFile) previewImport();
 });
 $("#emptyAddButton").addEventListener("click", openCreateDialog);
-$("#closeDialogButton").addEventListener("click", () => bookmarkDialog.close());
-$("#cancelDialogButton").addEventListener("click", () => bookmarkDialog.close());
+$("#closeDialogButton").addEventListener("click", cancelBookmark);
+$("#cancelDialogButton").addEventListener("click", cancelBookmark);
+$("#closeCaptureButton").addEventListener("click", cancelBookmark);
 $("#bookmarkForm").addEventListener("submit", submitBookmark);
 $("#selectionModeButton").addEventListener("click", () => {
   state.selecting = !state.selecting;
@@ -716,12 +736,13 @@ document.querySelectorAll(".nav-item").forEach((button) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
+  if (!state.capture && event.key === "/" && !["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)) {
     event.preventDefault();
     $("#searchInput").focus();
   }
-  if (event.key === "Escape" && bookmarkDialog.open) bookmarkDialog.close();
+  if (!state.capture && event.key === "Escape" && bookmarkDialog.open) bookmarkDialog.close();
   if (event.key === "Escape" && importDialog.open) importDialog.close();
 });
 
+configureBookmarklet();
 init();

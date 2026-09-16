@@ -70,11 +70,6 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/auth/login/start", a.handleLoginStart)
 	mux.HandleFunc("POST /api/auth/login/finish", a.handleLoginFinish)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
-	mux.Handle("POST /api/extension/pairings", a.requireAuth(http.HandlerFunc(a.handleExtensionPairingCreate)))
-	mux.Handle("GET /api/extension/clients", a.requireAuth(http.HandlerFunc(a.handleExtensionClientsList)))
-	mux.Handle("DELETE /api/extension/clients/{id}", a.requireAuth(http.HandlerFunc(a.handleExtensionClientRevoke)))
-	mux.HandleFunc("POST /api/extension/pair", a.handleExtensionPair)
-	mux.HandleFunc("POST /api/capture", a.handleCapture)
 	mux.Handle("GET /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksList)))
 	mux.Handle("POST /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksCreate)))
 	mux.Handle("PATCH /api/bookmarks/bulk", a.requireAuth(http.HandlerFunc(a.handleBookmarksBulkUpdate)))
@@ -103,7 +98,7 @@ func (a *App) routes() http.Handler {
 		}
 		static.ServeHTTP(w, r)
 	}))
-	return a.securityHeaders(a.extensionCORS(a.originCheck(mux)))
+	return a.securityHeaders(a.originCheck(mux))
 }
 
 func (a *App) securityHeaders(next http.Handler) http.Handler {
@@ -120,37 +115,13 @@ func (a *App) securityHeaders(next http.Handler) http.Handler {
 func (a *App) originCheck(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
-			if origin := r.Header.Get("Origin"); origin != "" && origin != a.cfg.PublicOrigin && !isAllowedExtensionRequest(r, origin) {
+			if origin := r.Header.Get("Origin"); origin != "" && origin != a.cfg.PublicOrigin {
 				writeError(w, http.StatusForbidden, "请求来源无效")
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-func (a *App) extensionCORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if isAllowedExtensionRequest(r, origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-			w.Header().Add("Vary", "Origin")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func isAllowedExtensionRequest(r *http.Request, origin string) bool {
-	if !strings.HasPrefix(origin, "chrome-extension://") {
-		return false
-	}
-	return r.URL.Path == "/api/extension/pair" || r.URL.Path == "/api/capture"
 }
 
 type contextKey string

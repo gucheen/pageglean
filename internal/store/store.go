@@ -84,13 +84,6 @@ type BulkBookmarkPatch struct {
 	Starred    *bool
 }
 
-type ExtensionClient struct {
-	ID         int64      `json:"id"`
-	Label      string     `json:"label"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
-}
-
 type ArchiveJob struct {
 	BookmarkID int64
 	URL        string
@@ -565,143 +558,6 @@ func (s *Store) DeleteAppSession(ctx context.Context, token string) error {
 	return err
 }
 
-func (s *Store) CreateExtensionPairing(ctx context.Context, ttl time.Duration) (string, time.Time, error) {
-	code, err := randomPairingCode()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	hash := sha256.Sum256([]byte(normalizePairingCode(code)))
-	now := s.now().UTC()
-	expires := now.Add(ttl)
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO extension_pairings (code_hash, expires_at, created_at)
-		VALUES (?, ?, ?)
-	`, hash[:], formatTime(expires), formatTime(now))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("save extension pairing: %w", err)
-	}
-	return code, expires, nil
-}
-
-func (s *Store) RedeemExtensionPairing(ctx context.Context, code, label string) (string, error) {
-	normalized := normalizePairingCode(code)
-	if len(normalized) != 8 {
-		return "", ErrNotFound
-	}
-	hash := sha256.Sum256([]byte(normalized))
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-	var expiresAt string
-	var usedAt sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-		SELECT expires_at, used_at FROM extension_pairings WHERE code_hash = ?
-	`, hash[:]).Scan(&expiresAt, &usedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-	expires, err := parseTime(expiresAt)
-	if err != nil || !expires.After(s.now()) || usedAt.Valid {
-		return "", ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE extension_pairings SET used_at = ? WHERE code_hash = ?`, formatTime(s.now()), hash[:]); err != nil {
-		return "", err
-	}
-	tokenRaw, err := randomBytes(32)
-	if err != nil {
-		return "", err
-	}
-	token := "pageglean_cap_" + base64.RawURLEncoding.EncodeToString(tokenRaw)
-	tokenHash := sha256.Sum256([]byte(token))
-	label = strings.TrimSpace(label)
-	if label == "" {
-		label = "Chromium"
-	}
-	if len(label) > 100 {
-		label = label[:100]
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO api_tokens (token_hash, label, scope, created_at)
-		VALUES (?, ?, 'capture', ?)
-	`, tokenHash[:], label, formatTime(s.now()))
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-func (s *Store) ValidateCaptureToken(ctx context.Context, token string) error {
-	if !strings.HasPrefix(token, "pageglean_cap_") || len(token) < 48 || len(token) > 80 {
-		return ErrNotFound
-	}
-	hash := sha256.Sum256([]byte(token))
-	var id int64
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT id FROM api_tokens
-		WHERE token_hash = ? AND scope = 'capture' AND revoked_at IS NULL
-	`, hash[:]).Scan(&id); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		return err
-	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE api_tokens SET last_used_at = ? WHERE id = ?`, formatTime(s.now()), id)
-	return nil
-}
-
-func (s *Store) ListExtensionClients(ctx context.Context) ([]ExtensionClient, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, label, created_at, last_used_at FROM api_tokens
-		WHERE scope = 'capture' AND revoked_at IS NULL ORDER BY created_at DESC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	clients := []ExtensionClient{}
-	for rows.Next() {
-		var client ExtensionClient
-		var createdAt string
-		var lastUsed sql.NullString
-		if err := rows.Scan(&client.ID, &client.Label, &createdAt, &lastUsed); err != nil {
-			return nil, err
-		}
-		client.CreatedAt, err = parseTime(createdAt)
-		if err != nil {
-			return nil, err
-		}
-		if lastUsed.Valid {
-			parsed, err := parseTime(lastUsed.String)
-			if err != nil {
-				return nil, err
-			}
-			client.LastUsedAt = &parsed
-		}
-		clients = append(clients, client)
-	}
-	return clients, rows.Err()
-}
-
-func (s *Store) RevokeExtensionClient(ctx context.Context, id int64) error {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND scope = 'capture' AND revoked_at IS NULL
-	`, formatTime(s.now()), id)
-	if err != nil {
-		return err
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 func (s *Store) ClaimArchiveJob(ctx context.Context) (*ArchiveJob, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -823,23 +679,6 @@ func (s *Store) RetryArchive(ctx context.Context, bookmarkID int64) error {
 		UPDATE bookmarks SET archive_status = 'pending', archive_error = '' WHERE id = ?;
 	`, bookmarkID, now, now, now, bookmarkID)
 	return err
-}
-
-func randomPairingCode() (string, error) {
-	const alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-	raw, err := randomBytes(8)
-	if err != nil {
-		return "", err
-	}
-	code := make([]byte, 8)
-	for index, value := range raw {
-		code[index] = alphabet[int(value)%len(alphabet)]
-	}
-	return string(code[:4]) + "-" + string(code[4:]), nil
-}
-
-func normalizePairingCode(code string) string {
-	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
 }
 
 func (s *Store) setBookmarkTagsTx(ctx context.Context, tx *sql.Tx, bookmarkID int64, values []string) error {

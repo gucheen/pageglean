@@ -68,23 +68,6 @@ CREATE TABLE IF NOT EXISTS bookmarks (
 CREATE INDEX IF NOT EXISTS idx_bookmarks_created_at ON bookmarks(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_unread ON bookmarks(unread, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_starred ON bookmarks(starred, created_at DESC);
-CREATE TABLE IF NOT EXISTS extension_pairings (
-    code_hash BLOB PRIMARY KEY,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    used_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS api_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    token_hash BLOB NOT NULL UNIQUE,
-    label TEXT NOT NULL,
-    scope TEXT NOT NULL CHECK (scope = 'capture'),
-    created_at TEXT NOT NULL,
-    last_used_at TEXT,
-    revoked_at TEXT
-);
-
 CREATE TABLE IF NOT EXISTS archive_jobs (
     bookmark_id INTEGER PRIMARY KEY REFERENCES bookmarks(id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing')),
