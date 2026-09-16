@@ -17,7 +17,6 @@
     <main id="authView" class="center-shell" hidden>
       <section class="auth-card">
         <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
-        <p class="eyebrow">PRIVATE WEB MEMORY</p>
         <h1 id="authTitle">用 Passkey 登录</h1>
         <p id="authDescription" class="auth-description">你的书签保持私密，只能通过已注册的 Passkey 访问。</p>
         <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
@@ -33,46 +32,32 @@
 
     <div id="appView" class="app-shell" hidden>
       <header class="topbar">
-        <div class="brand"><span class="brand-mark">拾</span><span>拾页</span></div>
+        <div class="brand">拾页</div>
         <label class="search-box">
           <span class="search-icon" aria-hidden="true">⌕</span>
-          <input id="searchInput" type="search" placeholder="搜索标题、标签或正文…" autocomplete="off">
+          <input id="searchInput" type="search" aria-label="搜索书签" placeholder="搜索标题、标签或正文…" autocomplete="off">
           <kbd>/</kbd>
         </label>
         <div class="topbar-actions">
-          <button id="addButton" class="button button-primary" type="button"><span aria-hidden="true">＋</span> 保存链接</button>
-          <button id="settingsButton" class="icon-button" type="button" title="设置" aria-label="设置">⚙</button>
-          <button id="logoutButton" class="icon-button account-button" type="button" title="退出登录" aria-label="退出登录">我</button>
+          <button id="addButton" class="text-button" type="button">添加</button>
+          <button id="settingsButton" class="text-button" type="button">设置</button>
+          <button id="logoutButton" class="text-button" type="button">退出</button>
         </div>
       </header>
 
-      <div class="workspace">
-        <aside class="sidebar">
-          <nav aria-label="书签筛选">
-            <button class="nav-item active" type="button" data-state="">
-              <span class="nav-icon">⌂</span><span>全部书签</span>
-            </button>
-            <button class="nav-item" type="button" data-state="unread">
-              <span class="nav-icon">◷</span><span>稍后阅读</span>
-            </button>
-            <button class="nav-item" type="button" data-state="starred">
-              <span class="nav-icon">☆</span><span>收藏</span>
-            </button>
-          </nav>
-          <div class="sidebar-note">
-            <span class="status-dot"></span>
-            <span>数据存储于你的服务器</span>
-          </div>
-        </aside>
-
-        <main class="content">
-          <div class="content-heading">
-            <div>
-              <p class="eyebrow">YOUR LIBRARY</p>
-              <h1 id="listTitle">全部书签</h1>
+      <main class="content">
+          <div class="list-toolbar">
+            <nav aria-label="书签筛选">
+              <button class="nav-item active" type="button" data-state="" aria-pressed="true">全部</button>
+              <button class="nav-item" type="button" data-state="unread" aria-pressed="false">稍后读</button>
+              <button class="nav-item" type="button" data-state="starred" aria-pressed="false">星标</button>
+            </nav>
+            <div class="list-tools">
+              <span id="resultSummary" class="muted" role="status"></span>
+              <button id="selectionModeButton" class="text-button" type="button" aria-pressed="false">选择</button>
             </div>
-            <p id="resultSummary" class="muted"></p>
           </div>
+          <h1 id="listTitle" class="sr-only">全部书签</h1>
 
           <div id="bulkBar" class="bulk-bar" hidden>
             <strong id="selectionCount">已选择 0 条</strong>
@@ -80,8 +65,8 @@
               <button id="selectPageButton" class="text-button" type="button">选择本页</button>
               <button class="text-button" type="button" data-bulk-state="unread">稍后阅读</button>
               <button class="text-button" type="button" data-bulk-state="read">标为已读</button>
-              <button class="text-button" type="button" data-bulk-state="starred">收藏</button>
-              <button class="text-button" type="button" data-bulk-state="unstarred">取消收藏</button>
+              <button class="text-button" type="button" data-bulk-state="starred">星标</button>
+              <button class="text-button" type="button" data-bulk-state="unstarred">取消星标</button>
               <button class="text-button" type="button" data-bulk-tags="add">添加标签</button>
               <button class="text-button" type="button" data-bulk-tags="remove">移除标签</button>
               <button id="bulkDeleteButton" class="text-button danger" type="button">删除</button>
@@ -92,20 +77,18 @@
           <section id="bookmarkList" class="bookmark-list" aria-live="polite"></section>
 
           <section id="emptyState" class="empty-state" hidden>
-            <div class="empty-glyph">↗</div>
+
             <h2 id="emptyTitle">保存第一个链接</h2>
             <p id="emptyDescription">从一个值得日后重看的网页开始。</p>
             <button id="emptyAddButton" class="button button-secondary" type="button">添加链接</button>
           </section>
-        </main>
-      </div>
+      </main>
     </div>
 
     <dialog id="bookmarkDialog" class="dialog">
       <form id="bookmarkForm" method="dialog">
         <div class="dialog-heading">
           <div>
-            <p class="eyebrow">SAVE FOR LATER</p>
             <h2 id="dialogTitle">保存链接</h2>
           </div>
           <button id="closeDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
@@ -129,7 +112,7 @@
         </label>
         <div class="check-row">
           <label class="check"><input id="unreadInput" type="checkbox"><span>稍后阅读</span></label>
-          <label class="check"><input id="starredInput" type="checkbox"><span>收藏</span></label>
+          <label class="check"><input id="starredInput" type="checkbox"><span>星标</span></label>
         </div>
         <p id="dialogError" class="form-error" role="alert"></p>
         <div class="dialog-actions">
@@ -142,7 +125,6 @@
     <dialog id="settingsDialog" class="dialog settings-dialog">
       <div class="dialog-heading">
         <div>
-          <p class="eyebrow">CAPTURE CLIENTS</p>
           <h2>浏览器扩展</h2>
         </div>
         <button id="closeSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
@@ -174,7 +156,6 @@
       <form id="importForm" method="dialog">
         <div class="dialog-heading">
           <div>
-            <p class="eyebrow">BRING YOUR LIBRARY</p>
             <h2>导入书签</h2>
           </div>
           <button id="closeImportButton" class="icon-button" type="button" aria-label="关闭">×</button>

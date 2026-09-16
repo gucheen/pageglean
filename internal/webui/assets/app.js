@@ -3,6 +3,7 @@ const state = {
   query: "",
   bookmarks: [],
   selected: new Set(),
+  selecting: false,
   importFile: null,
   importMapping: {},
   setupToken: new URLSearchParams(location.search).get("token") || "",
@@ -235,6 +236,7 @@ function bookmarkRow(bookmark) {
   const row = element("article", "bookmark-row");
   const selected = document.createElement("input");
   selected.type = "checkbox";
+  selected.hidden = !state.selecting;
   selected.className = "select-bookmark";
   selected.setAttribute("aria-label", `选择 ${bookmark.title || bookmark.url}`);
   selected.checked = state.selected.has(bookmark.id);
@@ -243,9 +245,9 @@ function bookmarkRow(bookmark) {
     else state.selected.delete(bookmark.id);
     renderBulkBar();
   });
-  const star = element("button", `star-button${bookmark.starred ? " active" : ""}`, bookmark.starred ? "★" : "☆");
+  const star = element("button", "text-button", bookmark.starred ? "取消星标" : "星标");
   star.type = "button";
-  star.title = bookmark.starred ? "取消收藏" : "收藏";
+  star.title = bookmark.starred ? "取消星标" : "星标";
   star.addEventListener("click", () => updateBookmark(bookmark.id, { starred: !bookmark.starred }));
 
   const body = element("div", "bookmark-body");
@@ -261,15 +263,16 @@ function bookmarkRow(bookmark) {
   if (bookmark.unread) meta.append(element("span", "badge", "稍后阅读"));
   for (const tag of bookmark.tags || []) meta.append(element("span", "badge", `#${tag}`));
   if (bookmark.archiveStatus === "complete") {
-    const archiveLink = element("a", "archive-link", "正文归档");
+    const archiveLink = element("a", "archive-link", "存档");
     archiveLink.href = `/archive/${bookmark.id}`;
     meta.append(archiveLink);
   } else if (bookmark.archiveStatus === "failed") {
     meta.append(element("span", "badge failed", "归档失败"));
-  } else if (bookmark.archiveStatus === "idle") {
-    meta.append(element("span", "badge", "未归档"));
-  } else {
-    meta.append(element("span", "badge pending", bookmark.archiveStatus === "processing" ? "正在归档" : "等待归档"));
+  }
+  if (bookmark.starred) {
+    const marker = element("span", "star-marker", "★");
+    marker.setAttribute("aria-label", "已加星标");
+    body.append(marker);
   }
   body.append(title, meta);
   if (bookmark.note) body.append(element("p", "bookmark-note", bookmark.note));
@@ -284,7 +287,7 @@ function bookmarkRow(bookmark) {
   const remove = element("button", "text-button danger", "删除");
   remove.type = "button";
   remove.addEventListener("click", () => deleteBookmark(bookmark));
-  actions.append(unread, edit);
+  actions.append(star, unread, edit);
   if (bookmark.archiveStatus === "failed" || bookmark.archiveStatus === "idle") {
     const retry = element("button", "text-button", bookmark.archiveStatus === "idle" ? "归档" : "重试归档");
     retry.type = "button";
@@ -292,14 +295,18 @@ function bookmarkRow(bookmark) {
     actions.append(retry);
   }
   actions.append(remove);
-  row.append(selected, star, body, actions);
+  body.append(actions);
+  row.append(selected, body);
   return row;
 }
 
 function renderBulkBar() {
   const bar = $("#bulkBar");
   const count = state.selected.size;
-  bar.hidden = count === 0;
+  bar.hidden = !state.selecting;
+  $("#bookmarkList").classList.toggle("selecting", state.selecting);
+  $("#selectionModeButton").textContent = state.selecting ? "完成" : "选择";
+  $("#selectionModeButton").setAttribute("aria-pressed", String(state.selecting));
   $("#selectionCount").textContent = `已选择 ${count} 条`;
 }
 
@@ -563,7 +570,7 @@ function renderCSVMapping(result) {
   container.hidden = false;
   const fields = [
     ["url", "网址（必选）"], ["title", "标题"], ["note", "备注"], ["tags", "标签"],
-    ["unread", "稍后阅读"], ["starred", "收藏"], ["createdAt", "创建时间"],
+    ["unread", "稍后阅读"], ["starred", "星标"], ["createdAt", "创建时间"],
   ];
   const mappingFields = $("#mappingFields");
   mappingFields.replaceChildren();
@@ -645,6 +652,11 @@ $("#emptyAddButton").addEventListener("click", openCreateDialog);
 $("#closeDialogButton").addEventListener("click", () => bookmarkDialog.close());
 $("#cancelDialogButton").addEventListener("click", () => bookmarkDialog.close());
 $("#bookmarkForm").addEventListener("submit", submitBookmark);
+$("#selectionModeButton").addEventListener("click", () => {
+  state.selecting = !state.selecting;
+  state.selected.clear();
+  renderBookmarks();
+});
 $("#selectPageButton").addEventListener("click", () => {
   for (const bookmark of state.bookmarks) state.selected.add(bookmark.id);
   document.querySelectorAll(".select-bookmark").forEach((checkbox) => { checkbox.checked = true; });
@@ -661,8 +673,8 @@ document.querySelectorAll("[data-bulk-state]").forEach((button) => {
     const action = button.dataset.bulkState;
     if (action === "unread") applyBulkUpdate({ unread: true }, "已标记为稍后阅读");
     if (action === "read") applyBulkUpdate({ unread: false }, "已标记为已读");
-    if (action === "starred") applyBulkUpdate({ starred: true }, "已添加收藏");
-    if (action === "unstarred") applyBulkUpdate({ starred: false }, "已取消收藏");
+    if (action === "starred") applyBulkUpdate({ starred: true }, "已添加星标");
+    if (action === "unstarred") applyBulkUpdate({ starred: false }, "已取消星标");
   });
 });
 document.querySelectorAll("[data-bulk-tags]").forEach((button) => {
@@ -691,10 +703,14 @@ $("#searchInput").addEventListener("input", (event) => {
 
 document.querySelectorAll(".nav-item").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach((item) => {
+      item.classList.remove("active");
+      item.setAttribute("aria-pressed", "false");
+    });
+    button.setAttribute("aria-pressed", "true");
     button.classList.add("active");
     state.filter = button.dataset.state;
-    $("#listTitle").textContent = state.filter === "unread" ? "稍后阅读" : state.filter === "starred" ? "收藏" : "全部书签";
+    $("#listTitle").textContent = state.filter === "unread" ? "稍后阅读" : state.filter === "starred" ? "星标" : "全部书签";
     loadBookmarks();
   });
 });
