@@ -80,8 +80,11 @@ func TestWebhookSigningRetryAndNoRestartReplay(t *testing.T) {
 	var events []string
 	fail := true
 	a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
-		if r.Header.Get("X-Webhook-Token") != "receiver-token" {
+		if r.Header.Get("Authorization") != "Bearer receiver-token" {
 			t.Fatal("missing webhook authentication token")
+		}
+		if _, present := r.Header["X-Webhook-Token"]; present {
+			t.Fatal("unexpected X-Webhook-Token header")
 		}
 		body, _ := io.ReadAll(r.Body)
 		mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
@@ -201,7 +204,7 @@ func TestNotificationCoalescingAndChangeDuringDelivery(t *testing.T) {
 	}
 	a.refreshPublication(t.Context(), true)
 	a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
-		if _, present := r.Header["X-Webhook-Token"]; present {
+		if _, present := r.Header["Authorization"]; present {
 			t.Fatal("unconfigured token header must be omitted")
 		}
 		b.Public = false

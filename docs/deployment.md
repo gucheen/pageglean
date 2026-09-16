@@ -91,4 +91,4 @@ blobs/
 
 ## 可选更新通知
 
-设置 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 即可启用公开书签更新通知，两项均留空时关闭。密钥至少 32 字节。接收端需要令牌认证时，可额外设置 `PAGEGLEAN_WEBHOOK_TOKEN`，通知会附带 `X-Webhook-Token` 请求头。通知状态不落库，重启不补发；如需同步，在设置页手动发送。签名协议见[公开书签与更新通知](public-bookmarks.md)。
+设置 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 即可启用公开书签更新通知，两项均留空时关闭。密钥至少 32 字节。接收端需要令牌认证时，可额外设置 `PAGEGLEAN_WEBHOOK_TOKEN`，通知会附带 `Authorization: Bearer <token>` 请求头。通知状态不落库，重启不补发；如需同步，在设置页手动发送。签名协议见[公开书签与更新通知](public-bookmarks.md)。
