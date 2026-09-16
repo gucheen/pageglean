@@ -257,9 +257,11 @@ function bookmarkRow(bookmark) {
     else state.selected.delete(bookmark.id);
     renderBulkBar();
   });
-  const star = element("button", "text-button", bookmark.starred ? "取消星标" : "星标");
+  const star = bookmarkAction(bookmark.starred ? "取消星标" : "加星标", "star");
+  star.classList.toggle("is-starred", bookmark.starred);
+  star.setAttribute("aria-pressed", String(bookmark.starred));
   star.type = "button";
-  star.title = bookmark.starred ? "取消星标" : "星标";
+  star.title = bookmark.starred ? "取消星标" : "加星标";
   star.addEventListener("click", () => updateBookmark(bookmark.id, { starred: !bookmark.starred }));
 
   const body = element("div", "bookmark-body");
@@ -272,6 +274,7 @@ function bookmarkRow(bookmark) {
   const date = element("time", "", formatDate(bookmark.createdAt));
   date.dateTime = bookmark.createdAt;
   meta.append(domain, element("span", "", "·"), date);
+  if (bookmark.public) meta.append(element("span", "badge", "公开"));
   if (bookmark.unread) meta.append(element("span", "badge", "稍后阅读"));
   for (const tag of bookmark.tags || []) meta.append(element("span", "badge", `#${tag}`));
   if (bookmark.archiveStatus === "complete") {
@@ -287,21 +290,25 @@ function bookmarkRow(bookmark) {
     body.append(marker);
   }
   body.append(title, meta);
+  if (bookmark.publicComment) body.append(element("p", "bookmark-note", `短评：${bookmark.publicComment}`));
   if (bookmark.note) body.append(element("p", "bookmark-note", bookmark.note));
 
   const actions = element("div", "row-actions");
-  const unread = element("button", "text-button", bookmark.unread ? "已读" : "稍后读");
+  actions.setAttribute("role", "group");
+  actions.setAttribute("aria-label", "书签操作");
+  const unread = bookmarkAction(bookmark.unread ? "标为已读" : "稍后阅读", bookmark.unread ? "check" : "clock");
   unread.type = "button";
   unread.addEventListener("click", () => updateBookmark(bookmark.id, { unread: !bookmark.unread }));
-  const edit = element("button", "text-button", "编辑");
+  const edit = bookmarkAction("编辑", "edit");
   edit.type = "button";
   edit.addEventListener("click", () => openEditDialog(bookmark));
-  const remove = element("button", "text-button danger", "删除");
+  const remove = bookmarkAction("删除", "trash");
+  remove.classList.add("danger");
   remove.type = "button";
   remove.addEventListener("click", () => deleteBookmark(bookmark));
   actions.append(star, unread, edit);
   if (bookmark.archiveStatus === "failed" || bookmark.archiveStatus === "idle") {
-    const retry = element("button", "text-button", bookmark.archiveStatus === "idle" ? "归档" : "重试归档");
+    const retry = bookmarkAction(bookmark.archiveStatus === "idle" ? "归档正文" : "重试归档", "archive");
     retry.type = "button";
     retry.addEventListener("click", () => retryArchive(bookmark.id));
     actions.append(retry);
@@ -310,6 +317,28 @@ function bookmarkRow(bookmark) {
   body.append(actions);
   row.append(selected, body);
   return row;
+}
+
+function bookmarkAction(label, icon) {
+  const paths = {
+    star: "m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9Z",
+    check: "m5 12 4 4L19 6",
+    clock: "M12 8v4l3 2 M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
+    edit: "m15 5 4 4 M4 20l4-1L20 7a2.8 2.8 0 0 0-4-4L4 15Z",
+    archive: "M4 4h16v4H4Z M6 8v12h12V8 M10 12h4",
+    trash: "M3 6h18 M9 6V3h6v3 M5 6l1 14h12l1-14 M10 10v6 M14 10v6",
+  };
+  const button = element("button", "bookmark-action");
+  button.type = "button";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  path.setAttribute("d", paths[icon]);
+  svg.append(path);
+  button.append(svg, element("span", "", label));
+  return button;
 }
 
 function renderBulkBar() {
@@ -374,6 +403,8 @@ function formatDate(value) {
 function openCreateDialog() {
   $("#bookmarkForm").reset();
   $("#bookmarkId").value = "";
+  $("#publicCommentField").hidden = true;
+  $("#pageDescription").hidden = true;
   $("#dialogTitle").textContent = "保存链接";
   $("#urlField").hidden = false;
   $("#urlInput").disabled = false;
@@ -392,6 +423,12 @@ function openEditDialog(bookmark) {
   $("#urlInput").disabled = true;
   $("#titleInput").value = bookmark.title;
   $("#noteInput").value = bookmark.note;
+  $("#publicInput").checked = Boolean(bookmark.public);
+  $("#publicCommentInput").value = bookmark.publicComment || "";
+  $("#publicCommentField").hidden = !bookmark.public;
+  $("#pageDescription").hidden = !bookmark.description;
+  $("#pageDescription").open = false;
+  $("#pageDescriptionText").textContent = bookmark.description || "";
   $("#tagsInput").value = (bookmark.tags || []).join(", ");
   $("#unreadInput").checked = bookmark.unread;
   $("#starredInput").checked = bookmark.starred;
@@ -406,12 +443,15 @@ async function submitBookmark(event) {
   const payload = {
     title: $("#titleInput").value,
     note: $("#noteInput").value,
+    public: $("#publicInput").checked,
+    publicComment: $("#publicCommentInput").value,
     tags: $("#tagsInput").value.split(/[,，]/).map((value) => value.trim()).filter(Boolean),
     unread: $("#unreadInput").checked,
     starred: $("#starredInput").checked,
   };
   if (!id) {
     payload.url = $("#urlInput").value;
+    payload.description = state.capture && $("#urlInput").value === captureParams.get("url") ? (captureParams.get("description") || "") : "";
     payload.archive = $("#archiveInput").checked;
   }
   setButtonBusy($("#saveButton"), true, "保存中…");
@@ -425,13 +465,13 @@ async function submitBookmark(event) {
     if (state.capture) {
       $("#captureSuccess").hidden = false;
       $("#captureResult").textContent = result?.duplicate
-        ? "这个链接已经保存过，已按重复链接规则合并。可以关闭此窗口继续浏览。"
+        ? "这个链接已经保存过，公开设置保持不变。修改公开设置请编辑原书签。"
         : "可以关闭此窗口，继续浏览原网页。";
       history.replaceState({}, "", "/add");
       window.close();
       return;
     }
-    showToast(result?.duplicate ? "这个链接已经保存过" : id ? "书签已更新" : "链接已保存");
+    showToast(result?.duplicate ? "链接已存在；修改公开设置请编辑原书签" : id ? "书签已更新" : "链接已保存");
     await loadBookmarks();
   } catch (error) {
     if (state.capture && error.status === 401) {
@@ -483,6 +523,8 @@ function showCaptureForm() {
     $("#urlInput").value = captureParams.get("url") || "";
     $("#titleInput").value = captureParams.get("title") || "";
     $("#noteInput").value = captureParams.get("note") || "";
+    $("#pageDescriptionText").textContent = captureParams.get("description") || "";
+    $("#pageDescription").hidden = !captureParams.get("description");
     $("#tagsInput").value = captureParams.get("tags") || "";
     $("#unreadInput").checked = captureParams.get("unread") === "1";
     $("#starredInput").checked = captureParams.get("starred") === "1";
@@ -503,7 +545,7 @@ function cancelBookmark() {
 
 function configureBookmarklet() {
   const destination = JSON.stringify(`${location.origin}/add`);
-  const code = `javascript:void(function(){var p=new URLSearchParams({url:location.href,title:document.title,note:String(window.getSelection()||"").slice(0,2000)});window.open(${destination}+"#"+p.toString(),"_blank","popup,width=720,height=760,noopener,noreferrer");}())`;
+  const code = `javascript:void(function(){var p=new URLSearchParams({url:location.href,title:document.title,description:(document.querySelector('meta[name="description" i]')?.content||document.querySelector('meta[property="og:description" i]')?.content||"").slice(0,2000),note:String(window.getSelection()||"").slice(0,2000)});window.open(${destination}+"#"+p.toString(),"_blank","popup,width=720,height=760,noopener,noreferrer");}())`;
   $("#bookmarkletLink").href = code;
   $("#bookmarkletLink").addEventListener("click", (event) => {
     event.preventDefault();
@@ -513,7 +555,45 @@ function configureBookmarklet() {
 
 async function openSettings() {
   settingsDialog.showModal();
-  await loadStorageStats();
+  await Promise.all([loadStorageStats(), loadPublicationStatus()]);
+}
+
+async function loadPublicationStatus() {
+  const status = $("#publicationStatus");
+  const button = $("#retryPublicationButton");
+  button.disabled = true;
+  try {
+    const result = await request("/api/publication");
+    button.disabled = !result.configured;
+    if (!result.configured) {
+      status.textContent = "尚未配置更新通知；公开 JSON 可独立使用。";
+      return;
+    }
+    const notification = result.notification;
+    let message;
+    if (notification.dueAt) message = notification.lastError
+      ? `通知失败：${notification.lastError}，将自动重试。`
+      : "已排队，等待发送更新通知。";
+    else if (notification.lastError) message = `通知失败：${notification.lastError}，请检查接收端后重试。`;
+    else if (notification.notifiedAt) message = `通知已送达（${new Date(notification.notifiedAt).toLocaleString("zh-CN")}）；后续处理由接收方负责。`;
+    else message = "等待公开书签更新。";
+    status.textContent = `${message} 通知状态仅保留到服务重启。`;
+  } catch (error) {
+    status.textContent = error.message;
+  }
+}
+
+async function retryPublication() {
+  const button = $("#retryPublicationButton");
+  setButtonBusy(button, true, "正在排队…");
+  try {
+    await request("/api/publication/retry", { method: "POST" });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.textContent = "发送更新通知";
+    await loadPublicationStatus();
+  }
 }
 
 async function loadStorageStats() {
@@ -589,7 +669,7 @@ function renderCSVMapping(result) {
   }
   container.hidden = false;
   const fields = [
-    ["url", "网址（必选）"], ["title", "标题"], ["note", "备注"], ["tags", "标签"],
+    ["url", "网址（必选）"], ["title", "标题"], ["note", "私人备注"], ["description", "网页描述"], ["publicComment", "公开短评"], ["tags", "标签"],
     ["unread", "稍后阅读"], ["starred", "星标"], ["createdAt", "创建时间"],
   ];
   const mappingFields = $("#mappingFields");
@@ -655,6 +735,11 @@ function showToast(message) {
   toastTimer = setTimeout(() => { toast.hidden = true; }, 2600);
 }
 
+$("#publicInput").addEventListener("change", () => {
+  $("#publicCommentField").hidden = !$("#publicInput").checked;
+});
+$("#retryPublicationButton").addEventListener("click", retryPublication);
+$("#refreshPublicationButton").addEventListener("click", loadPublicationStatus);
 $("#addButton").addEventListener("click", openCreateDialog);
 $("#settingsButton").addEventListener("click", openSettings);
 $("#closeSettingsButton").addEventListener("click", () => settingsDialog.close());
@@ -730,7 +815,7 @@ document.querySelectorAll(".nav-item").forEach((button) => {
     button.setAttribute("aria-pressed", "true");
     button.classList.add("active");
     state.filter = button.dataset.state;
-    $("#listTitle").textContent = state.filter === "unread" ? "稍后阅读" : state.filter === "starred" ? "星标" : "全部书签";
+    $("#listTitle").textContent = state.filter === "unread" ? "稍后阅读" : state.filter === "starred" ? "星标" : state.filter === "public" ? "公开书签" : "全部书签";
     loadBookmarks();
   });
 });

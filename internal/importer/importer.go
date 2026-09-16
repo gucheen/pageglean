@@ -24,23 +24,27 @@ const (
 )
 
 type Item struct {
-	URL       string    `json:"url"`
-	Title     string    `json:"title"`
-	Note      string    `json:"note"`
-	Tags      []string  `json:"tags"`
-	Unread    bool      `json:"unread"`
-	Starred   bool      `json:"starred"`
-	CreatedAt time.Time `json:"createdAt,omitempty"`
+	Description   string    `json:"description"`
+	PublicComment string    `json:"publicComment"`
+	URL           string    `json:"url"`
+	Title         string    `json:"title"`
+	Note          string    `json:"note"`
+	Tags          []string  `json:"tags"`
+	Unread        bool      `json:"unread"`
+	Starred       bool      `json:"starred"`
+	CreatedAt     time.Time `json:"createdAt,omitempty"`
 }
 
 type Mapping struct {
-	URL       string `json:"url"`
-	Title     string `json:"title"`
-	Note      string `json:"note"`
-	Tags      string `json:"tags"`
-	Unread    string `json:"unread"`
-	Starred   string `json:"starred"`
-	CreatedAt string `json:"createdAt"`
+	Description   string `json:"description"`
+	PublicComment string `json:"publicComment"`
+	URL           string `json:"url"`
+	Title         string `json:"title"`
+	Note          string `json:"note"`
+	Tags          string `json:"tags"`
+	Unread        string `json:"unread"`
+	Starred       string `json:"starred"`
+	CreatedAt     string `json:"createdAt"`
 }
 
 type Result struct {
@@ -188,12 +192,14 @@ func parseCSV(data []byte, mapping Mapping) (Result, error) {
 	skipped := 0
 	for _, record := range records[1:] {
 		item := Item{
-			URL:     csvValue(record, indexes, mapping.URL),
-			Title:   csvValue(record, indexes, mapping.Title),
-			Note:    csvValue(record, indexes, mapping.Note),
-			Tags:    splitTags(csvValue(record, indexes, mapping.Tags)),
-			Unread:  parseBool(csvValue(record, indexes, mapping.Unread)),
-			Starred: parseBool(csvValue(record, indexes, mapping.Starred)),
+			Description:   csvValue(record, indexes, mapping.Description),
+			PublicComment: csvValue(record, indexes, mapping.PublicComment),
+			URL:           csvValue(record, indexes, mapping.URL),
+			Title:         csvValue(record, indexes, mapping.Title),
+			Note:          csvValue(record, indexes, mapping.Note),
+			Tags:          splitTags(csvValue(record, indexes, mapping.Tags)),
+			Unread:        parseBool(csvValue(record, indexes, mapping.Unread)),
+			Starred:       parseBool(csvValue(record, indexes, mapping.Starred)),
 		}
 		if rawTime := csvValue(record, indexes, mapping.CreatedAt); rawTime != "" {
 			item.CreatedAt = parseTime(rawTime)
@@ -220,6 +226,8 @@ func finish(format string, headers []string, mapping Mapping, items []Item) (Res
 		item.URL = strings.TrimSpace(item.URL)
 		item.Title = cleanText(item.Title)
 		item.Note = cleanText(item.Note)
+		item.Description = cleanText(item.Description)
+		item.PublicComment = cleanText(item.PublicComment)
 		item.Tags = normalizeTags(item.Tags)
 		if item.URL == "" {
 			skipped++
@@ -232,13 +240,15 @@ func finish(format string, headers []string, mapping Mapping, items []Item) (Res
 
 func inferMapping(headers []string) Mapping {
 	aliases := map[string][]string{
-		"url":        {"url", "href", "link", "网址", "链接"},
-		"title":      {"title", "name", "标题", "名称"},
-		"note":       {"note", "notes", "description", "备注", "描述"},
-		"tags":       {"tags", "tag", "labels", "标签"},
-		"unread":     {"unread", "read_later", "later", "稍后阅读"},
-		"starred":    {"starred", "favorite", "favourite", "收藏"},
-		"created_at": {"created_at", "createdat", "add_date", "date", "创建时间"},
+		"description":   {"description", "网页描述", "描述"},
+		"publicComment": {"publicComment", "public_comment", "公开短评"},
+		"url":           {"url", "href", "link", "网址", "链接"},
+		"title":         {"title", "name", "标题", "名称"},
+		"note":          {"note", "notes", "备注", "私人备注"},
+		"tags":          {"tags", "tag", "labels", "标签"},
+		"unread":        {"unread", "read_later", "later", "稍后阅读"},
+		"starred":       {"starred", "favorite", "favourite", "收藏"},
+		"created_at":    {"created_at", "createdat", "add_date", "date", "创建时间"},
 	}
 	find := func(key string) string {
 		for _, header := range headers {
@@ -252,7 +262,7 @@ func inferMapping(headers []string) Mapping {
 		return ""
 	}
 	return Mapping{
-		URL: find("url"), Title: find("title"), Note: find("note"), Tags: find("tags"),
+		Description: find("description"), PublicComment: find("publicComment"), URL: find("url"), Title: find("title"), Note: find("note"), Tags: find("tags"),
 		Unread: find("unread"), Starred: find("starred"), CreatedAt: find("created_at"),
 	}
 }

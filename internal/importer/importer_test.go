@@ -68,3 +68,19 @@ func TestParseGB18030CSV(t *testing.T) {
 		t.Fatalf("unexpected GB18030 result: %#v", result)
 	}
 }
+
+func TestDescriptionNoteAndPublicCommentStaySeparate(t *testing.T) {
+	for _, file := range []struct{ name, body string }{
+		{"bookmarks.json", `{"bookmarks":[{"url":"https://example.com","description":"page","note":"private","publicComment":"recommendation","public":true}]}`},
+		{"bookmarks.csv", "url,description,note,public_comment,public\nhttps://example.com,page,private,recommendation,true\n"},
+	} {
+		result, err := Parse(file.name, strings.NewReader(file.body), Mapping{})
+		if err != nil || len(result.Items) != 1 {
+			t.Fatalf("parse: %#v %v", result, err)
+		}
+		got := result.Items[0]
+		if got.Description != "page" || got.Note != "private" || got.PublicComment != "recommendation" {
+			t.Fatalf("fields mixed: %#v", got)
+		}
+	}
+}

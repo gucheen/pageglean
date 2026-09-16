@@ -176,12 +176,18 @@ a { color: inherit; }
 .bookmark-domain { color: var(--muted); overflow-wrap: anywhere; }
 .bookmark-note { margin: 3px 0 0; color: #595959; line-height: 1.5; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .badge { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-.row-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 2px; }
+.row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; margin: 5px 0 0 -6px; }
 .text-button { padding: 3px 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 12px; line-height: 1.5; }
 .text-button:hover { color: var(--ink); text-decoration: underline; }
 .topbar-actions .text-button { padding: 6px; font-size: 13px; }
 .text-button.danger:hover { color: #ad2d23; }
-.row-actions .text-button { font-size: 11px; }
+.bookmark-action { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 6px; border: 0; border-radius: 4px; color: #525252; background: transparent; cursor: pointer; font-size: 13px; line-height: 1.4; white-space: nowrap; }
+.bookmark-action svg { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.bookmark-action:hover { color: var(--ink); background: #f0f0f0; }
+.bookmark-action.is-starred { color: #805b13; }
+.bookmark-action.is-starred svg { fill: #f6e6b6; }
+.bookmark-action.danger { margin-left: 5px; color: #8c5149; }
+.bookmark-action.danger:hover { color: #a32c20; background: #fff0ed; }
 
 .empty-state { padding: 80px 20px; text-align: center; }
 .empty-glyph { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 16px; border: 1px solid var(--line); border-radius: 12px; color: var(--accent); background: var(--surface); font-size: 22px; }
@@ -268,8 +274,8 @@ a { color: inherit; }
   .search-box input { font-size: 16px; min-height: 28px; }
   .list-toolbar nav { gap: 14px; }
   .nav-item, .list-tools .text-button { min-height: 40px; }
-  .row-actions { gap: 16px; }
-  .row-actions .text-button { min-height: 36px; font-size: 12px; }
+  .row-actions { gap: 2px 8px; }
+  .bookmark-action { min-height: 40px; }
   .bulk-bar { align-items: flex-start; flex-direction: column; }
   .bulk-actions { justify-content: flex-start; gap: 12px; }
   .mapping-fields { grid-template-columns: 1fr; }
@@ -291,3 +297,14 @@ a { color: inherit; }
 .capture-form .dialog-heading { display: none; }
 .capture-success { padding-top: 24px; }
 .capture-success h1 { font-size: 20px; }
+
+.public-comment-field { margin-top: 12px; }
+.page-description { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.page-description summary { cursor: pointer; }
+.page-description p { margin: 6px 0; overflow-wrap: anywhere; }
+@media (max-width: 400px) {
+  .list-toolbar { flex-wrap: wrap; }
+  .list-tools { margin-left: auto; }
+}
+
+.notification-actions { display: flex; gap: 16px; }

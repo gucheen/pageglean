@@ -10,21 +10,26 @@ import (
 )
 
 type createBookmarkRequest struct {
-	Archive *bool    `json:"archive"`
-	URL     string   `json:"url"`
-	Title   string   `json:"title"`
-	Note    string   `json:"note"`
-	Tags    []string `json:"tags"`
-	Unread  bool     `json:"unread"`
-	Starred bool     `json:"starred"`
+	Description   string   `json:"description"`
+	Public        bool     `json:"public"`
+	PublicComment string   `json:"publicComment"`
+	Archive       *bool    `json:"archive"`
+	URL           string   `json:"url"`
+	Title         string   `json:"title"`
+	Note          string   `json:"note"`
+	Tags          []string `json:"tags"`
+	Unread        bool     `json:"unread"`
+	Starred       bool     `json:"starred"`
 }
 
 type updateBookmarkRequest struct {
-	Title   *string   `json:"title"`
-	Note    *string   `json:"note"`
-	Tags    *[]string `json:"tags"`
-	Unread  *bool     `json:"unread"`
-	Starred *bool     `json:"starred"`
+	Public        *bool     `json:"public"`
+	PublicComment *string   `json:"publicComment"`
+	Title         *string   `json:"title"`
+	Note          *string   `json:"note"`
+	Tags          *[]string `json:"tags"`
+	Unread        *bool     `json:"unread"`
+	Starred       *bool     `json:"starred"`
 }
 
 type bulkBookmarkRequest struct {
@@ -40,8 +45,8 @@ func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if len(input.Title) > 500 || len(input.Note) > 10000 {
-		writeError(w, http.StatusBadRequest, "标题或备注过长")
+	if len(input.Title) > 500 || len(input.Note) > 10000 || len(input.Description) > 10000 || len([]rune(input.PublicComment)) > 1000 {
+		writeError(w, http.StatusBadRequest, "标题、备注或公开短评过长")
 		return
 	}
 	original, canonical, err := bookmarks.NormalizeURL(input.URL)
@@ -53,11 +58,13 @@ func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
 		URL:          original,
 		CanonicalURL: canonical,
 		Title:        strings.TrimSpace(input.Title),
+		Description:  strings.TrimSpace(input.Description),
 		Note:         strings.TrimSpace(input.Note),
 		Tags:         input.Tags,
 		Unread:       input.Unread,
 		Starred:      input.Starred,
 		SkipArchive:  input.Archive != nil && !*input.Archive,
+		Public:       input.Public, PublicComment: strings.TrimSpace(input.PublicComment),
 	})
 	if err != nil {
 		a.internalError(w, r, err)
@@ -117,6 +124,16 @@ func (a *App) handleBookmarksUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		bookmark.Note = strings.TrimSpace(*input.Note)
+	}
+	if input.Public != nil {
+		bookmark.Public = *input.Public
+	}
+	if input.PublicComment != nil {
+		if len([]rune(*input.PublicComment)) > 1000 {
+			writeError(w, http.StatusBadRequest, "公开短评不能超过 1000 个字符")
+			return
+		}
+		bookmark.PublicComment = strings.TrimSpace(*input.PublicComment)
 	}
 	if input.Tags != nil {
 		bookmark.Tags = *input.Tags

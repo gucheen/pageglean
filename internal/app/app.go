@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -19,17 +20,23 @@ import (
 )
 
 type App struct {
-	cfg      config.Config
-	store    *store.Store
-	webauthn *webauthn.WebAuthn
-	archiver *archive.Archiver
-	logger   *slog.Logger
-	handler  http.Handler
+	cfg           config.Config
+	store         *store.Store
+	webauthn      *webauthn.WebAuthn
+	archiver      *archive.Archiver
+	logger        *slog.Logger
+	handler       http.Handler
+	webhookClient *http.Client
+	publicationMu sync.Mutex
+	publication   PublicationNotification
 }
 
 const webAuthnCeremonyTimeout = 5 * time.Minute
 
 func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error) {
+	if err := config.ValidateWebhook(cfg.WebhookURL, cfg.WebhookSecret); err != nil {
+		return nil, err
+	}
 	wa, err := webauthn.New(&webauthn.Config{
 		RPDisplayName: "拾页",
 		RPID:          cfg.RPID,
@@ -51,6 +58,12 @@ func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error
 	}
 	a := &App{cfg: cfg, store: data, webauthn: wa, logger: logger}
 	a.archiver = archive.New(cfg, data, logger)
+	a.webhookClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	feed, err := data.PublicFeed(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("load public bookmarks: %w", err)
+	}
+	a.publication.Revision = feed.Revision
 	a.handler = a.routes()
 	return a, nil
 }
@@ -59,11 +72,17 @@ func (a *App) Handler() http.Handler { return a.handler }
 
 func (a *App) Start(ctx context.Context) {
 	go a.archiver.Run(ctx)
+	if a.cfg.WebhookURL != "" {
+		go a.runPublication(ctx)
+	}
 }
 
 func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.handleHealth)
+	mux.HandleFunc("GET /public/bookmarks.json", a.handlePublicFeed)
+	mux.Handle("GET /api/publication", a.requireAuth(http.HandlerFunc(a.handlePublicationStatus)))
+	mux.Handle("POST /api/publication/retry", a.requireAuth(http.HandlerFunc(a.handlePublicationRetry)))
 	mux.HandleFunc("GET /api/status", a.handleStatus)
 	mux.HandleFunc("POST /api/auth/register/start", a.handleRegisterStart)
 	mux.HandleFunc("POST /api/auth/register/finish", a.handleRegisterFinish)

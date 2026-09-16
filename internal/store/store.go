@@ -47,6 +47,8 @@ func (u *User) WebAuthnDisplayName() string                { return u.DisplayNam
 func (u *User) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 
 type Bookmark struct {
+	Public        bool       `json:"public"`
+	PublicComment string     `json:"publicComment"`
 	ID            int64      `json:"id"`
 	URL           string     `json:"url"`
 	CanonicalURL  string     `json:"canonicalUrl"`
@@ -264,6 +266,8 @@ func (s *Store) ensureBookmarkColumns(ctx context.Context) error {
 	}
 	columns := []struct{ name, definition string }{
 		{"description", `TEXT NOT NULL DEFAULT ''`},
+		{"is_public", `INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1))`},
+		{"public_comment", `TEXT NOT NULL DEFAULT ''`},
 		{"author", `TEXT NOT NULL DEFAULT ''`},
 		{"capture_source", `TEXT NOT NULL DEFAULT 'web'`},
 		{"archive_status", `TEXT NOT NULL DEFAULT 'pending'`},
@@ -284,7 +288,8 @@ func (s *Store) ensureBookmarkColumns(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_bookmarks_archive_status ON bookmarks(archive_status, created_at DESC)`); err != nil {
 		return fmt.Errorf("create archive status index: %w", err)
 	}
-	return nil
+	_, err = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_bookmarks_public ON bookmarks(created_at DESC, id DESC) WHERE is_public = 1`)
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -757,7 +762,7 @@ func (s *Store) reindexBookmarkTx(ctx context.Context, tx *sql.Tx, bookmarkID in
 	}
 	var title, note, rawURL, body string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT title, note, url, content_text FROM bookmarks WHERE id = ?
+		SELECT title, note || ' ' || public_comment || ' ' || description, url, content_text FROM bookmarks WHERE id = ?
 	`, bookmarkID).Scan(&title, &note, &rawURL, &body); err != nil {
 		return err
 	}
@@ -906,11 +911,11 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO bookmarks
 		    (url, canonical_url, title, description, author, note, unread, starred, capture_source,
-		     archive_status, created_at, updated_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     archive_status, created_at, updated_at, last_seen_at, is_public, public_comment)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, bookmark.URL, bookmark.CanonicalURL, bookmark.Title, bookmark.Description, bookmark.Author,
 		bookmark.Note, bookmark.Unread, bookmark.Starred, bookmark.CaptureSource, archiveStatus,
-		formatTime(createdAt), formatTime(now), formatTime(now))
+		formatTime(createdAt), formatTime(now), formatTime(now), bookmark.Public, bookmark.PublicComment)
 	if err != nil {
 		return Bookmark{}, false, fmt.Errorf("insert bookmark: %w", err)
 	}
@@ -944,7 +949,7 @@ func (s *Store) GetBookmark(ctx context.Context, id int64) (Bookmark, error) {
 	bookmark, err := scanBookmark(s.db.QueryRowContext(ctx, `
 		SELECT id, url, canonical_url, title, description, author, note, unread, starred,
 		       capture_source, archive_status, archive_error, content_path, content_hash, archived_at,
-		       created_at, updated_at, last_seen_at
+		       created_at, updated_at, last_seen_at, is_public, public_comment
 		FROM bookmarks WHERE id = ?
 	`, id))
 	if err != nil {
@@ -967,20 +972,22 @@ func (s *Store) ListBookmarks(ctx context.Context, filter BookmarkFilter) ([]Boo
 	searchQuery := strings.TrimSpace(filter.Query)
 	useFTS := searchQuery != "" && s.ftsEnabled && searchindex.Query(searchQuery) != ""
 	if searchQuery != "" && !useFTS {
-		where = append(where, `(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.note LIKE ? ESCAPE '\' OR b.content_text LIKE ? ESCAPE '\')`)
+		where = append(where, `(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.note LIKE ? ESCAPE '\' OR b.content_text LIKE ? ESCAPE '\' OR b.public_comment LIKE ? ESCAPE '\' OR b.description LIKE ? ESCAPE '\')`)
 		pattern := "%" + escapeLike(searchQuery) + "%"
-		args = append(args, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	switch filter.State {
 	case "unread":
 		where = append(where, `b.unread = 1`)
 	case "starred":
 		where = append(where, `b.starred = 1`)
+	case "public":
+		where = append(where, `b.is_public = 1`)
 	}
 	query := `
 		SELECT b.id, b.url, b.canonical_url, b.title, b.description, b.author, b.note, b.unread, b.starred,
 		       capture_source, archive_status, archive_error, content_path, content_hash, archived_at,
-		       created_at, updated_at, last_seen_at
+		       created_at, updated_at, last_seen_at, is_public, public_comment
 		FROM bookmarks b`
 	if useFTS {
 		query += ` JOIN bookmark_fts ON bookmark_fts.bookmark_id = b.id`
@@ -1036,9 +1043,9 @@ func (s *Store) UpdateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE bookmarks
-		SET title = ?, note = ?, unread = ?, starred = ?, updated_at = ?
+		SET title = ?, note = ?, unread = ?, starred = ?, updated_at = ?, is_public = ?, public_comment = ?
 		WHERE id = ?
-	`, bookmark.Title, bookmark.Note, bookmark.Unread, bookmark.Starred, formatTime(s.now()), bookmark.ID)
+	`, bookmark.Title, bookmark.Note, bookmark.Unread, bookmark.Starred, formatTime(s.now()), bookmark.Public, bookmark.PublicComment, bookmark.ID)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("update bookmark: %w", err)
 	}
@@ -1223,7 +1230,7 @@ func scanBookmark(row scanner) (Bookmark, error) {
 		&bookmark.ID, &bookmark.URL, &bookmark.CanonicalURL, &bookmark.Title, &bookmark.Description,
 		&bookmark.Author, &bookmark.Note, &unread, &starred, &bookmark.CaptureSource,
 		&bookmark.ArchiveStatus, &bookmark.ArchiveError, &bookmark.ContentPath, &bookmark.ContentHash,
-		&archivedAt, &createdAt, &updatedAt, &lastSeenAt,
+		&archivedAt, &createdAt, &updatedAt, &lastSeenAt, &bookmark.Public, &bookmark.PublicComment,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bookmark{}, ErrNotFound

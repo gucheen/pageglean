@@ -9,6 +9,8 @@ import (
 )
 
 type Config struct {
+	WebhookURL        string
+	WebhookSecret     string
 	Addr              string
 	PublicURL         string
 	PublicOrigin      string
@@ -47,9 +49,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve PAGEGLEAN_DATA_DIR: %w", err)
 	}
+	webhookURL := strings.TrimSpace(os.Getenv("PAGEGLEAN_WEBHOOK_URL"))
+	webhookSecret := os.Getenv("PAGEGLEAN_WEBHOOK_SECRET")
+	if err := ValidateWebhook(webhookURL, webhookSecret); err != nil {
+		return Config{}, err
+	}
 	origin := parsed.Scheme + "://" + parsed.Host
 	return Config{
-		Addr:              envOr("PAGEGLEAN_ADDR", ":8080"),
+		WebhookURL: webhookURL, WebhookSecret: webhookSecret, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
 		PublicURL:         strings.TrimRight(origin, "/"),
 		PublicOrigin:      origin,
 		RPID:              rpID,
@@ -65,4 +72,18 @@ func envOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func ValidateWebhook(endpoint, secret string) error {
+	if endpoint == "" && secret == "" {
+		return nil
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.Fragment != "" {
+		return fmt.Errorf("PAGEGLEAN_WEBHOOK_URL must be an HTTP(S) URL without credentials or a fragment")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("PAGEGLEAN_WEBHOOK_SECRET must contain at least 32 bytes")
+	}
+	return nil
 }

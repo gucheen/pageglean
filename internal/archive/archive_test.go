@@ -76,3 +76,15 @@ func TestPrivateAddressesAreBlocked(t *testing.T) {
 		t.Fatal("public address was blocked")
 	}
 }
+
+func TestPageDescriptionUsesMetadataOnly(t *testing.T) {
+	for _, tc := range []struct{ html, want string }{
+		{`<html><head><meta property="og:description" content="Social description"><meta name="description" content="Page &amp; description"></head><body>Article text</body></html>`, "Page & description"},
+		{`<html><head><meta property="og:description" content="Social description"></head><body>Article text</body></html>`, "Social description"},
+		{`<html><head><title>Title</title></head><body>Article text should not become a description</body></html>`, ""},
+	} {
+		if got := pageDescription([]byte(tc.html), "text/html; charset=utf-8"); got != tc.want {
+			t.Fatalf("description = %q, want %q", got, tc.want)
+		}
+	}
+}

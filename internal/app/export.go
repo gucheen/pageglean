@@ -31,12 +31,12 @@ func (a *App) handleExport(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pageglean-%s.csv"`, date))
 		_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
 		writer := csv.NewWriter(w)
-		_ = writer.Write([]string{"url", "title", "note", "tags", "unread", "starred", "created_at", "archive_status"})
+		_ = writer.Write([]string{"url", "title", "note", "tags", "unread", "starred", "created_at", "archive_status", "description", "public_comment", "public"})
 		for _, bookmark := range bookmarks {
 			_ = writer.Write([]string{
 				bookmark.URL, bookmark.Title, bookmark.Note, strings.Join(bookmark.Tags, ","),
 				strconv.FormatBool(bookmark.Unread), strconv.FormatBool(bookmark.Starred),
-				bookmark.CreatedAt.Format(time.RFC3339), bookmark.ArchiveStatus,
+				bookmark.CreatedAt.Format(time.RFC3339), bookmark.ArchiveStatus, bookmark.Description, bookmark.PublicComment, strconv.FormatBool(bookmark.Public),
 			})
 		}
 		writer.Flush()

@@ -95,12 +95,13 @@ func prepareImportedItems(items []importer.Item, skipArchive bool) ([]store.Book
 	invalid := 0
 	for _, item := range items {
 		original, canonical, err := bookmarks.NormalizeURL(item.URL)
-		if err != nil || len(item.Title) > 500 || len(item.Note) > 10_000 || !validImportTags(item.Tags) {
+		if err != nil || len(item.Title) > 500 || len(item.Note) > 10_000 || len(item.Description) > 10_000 || len([]rune(item.PublicComment)) > 1000 || !validImportTags(item.Tags) {
 			invalid++
 			continue
 		}
 		prepared = append(prepared, store.Bookmark{
 			URL: original, CanonicalURL: canonical, Title: strings.TrimSpace(item.Title),
+			Description: strings.TrimSpace(item.Description), PublicComment: strings.TrimSpace(item.PublicComment),
 			Note: strings.TrimSpace(item.Note), Tags: item.Tags, Unread: item.Unread, Starred: item.Starred,
 			CreatedAt: item.CreatedAt, CaptureSource: "import", SkipArchive: skipArchive,
 		})

@@ -22,6 +22,8 @@ import (
 	"unicode/utf8"
 
 	readability "github.com/go-shiori/go-readability"
+	xhtml "golang.org/x/net/html"
+	"golang.org/x/net/html/charset"
 
 	"pageglean/internal/config"
 	"pageglean/internal/store"
@@ -149,7 +151,7 @@ func (a *Archiver) fetchAndStore(ctx context.Context, value string) (store.Archi
 		return store.ArchiveContent{}, err
 	}
 	return store.ArchiveContent{
-		Title: strings.TrimSpace(article.Title), Description: strings.TrimSpace(article.Excerpt),
+		Title: strings.TrimSpace(article.Title), Description: pageDescription(raw, response.Header.Get("Content-Type")),
 		Author: strings.TrimSpace(article.Byline), Text: text,
 		Path: filepath.ToSlash(relative), Hash: hash,
 	}, nil
@@ -323,4 +325,46 @@ func safeDialContext(ctx context.Context, network, address string) (net.Conn, er
 func isPublicIP(ip net.IP) bool {
 	return ip != nil && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+func pageDescription(raw []byte, contentType string) string {
+	reader, err := charset.NewReader(bytes.NewReader(raw), contentType)
+	if err != nil {
+		return ""
+	}
+	tokenizer := xhtml.NewTokenizer(reader)
+	var fallback string
+	for {
+		kind := tokenizer.Next()
+		if kind == xhtml.ErrorToken {
+			return fallback
+		}
+		if kind != xhtml.StartTagToken && kind != xhtml.SelfClosingTagToken {
+			continue
+		}
+		token := tokenizer.Token()
+		if token.Data == "body" {
+			return fallback
+		}
+		if token.Data != "meta" {
+			continue
+		}
+		var name, property, content string
+		for _, attr := range token.Attr {
+			switch attr.Key {
+			case "name":
+				name = strings.ToLower(attr.Val)
+			case "property":
+				property = strings.ToLower(attr.Val)
+			case "content":
+				content = truncateUTF8(strings.TrimSpace(attr.Val), 10000)
+			}
+		}
+		if name == "description" && content != "" {
+			return content
+		}
+		if property == "og:description" && fallback == "" {
+			fallback = content
+		}
+	}
 }

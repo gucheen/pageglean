@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     description TEXT NOT NULL DEFAULT '',
     author TEXT NOT NULL DEFAULT '',
     note TEXT NOT NULL DEFAULT '',
+    is_public INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1)),
+    public_comment TEXT NOT NULL DEFAULT '',
     unread INTEGER NOT NULL DEFAULT 0 CHECK (unread IN (0, 1)),
     starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
     capture_source TEXT NOT NULL DEFAULT 'web',

@@ -51,6 +51,7 @@
               <button class="nav-item active" type="button" data-state="" aria-pressed="true">全部</button>
               <button class="nav-item" type="button" data-state="unread" aria-pressed="false">稍后读</button>
               <button class="nav-item" type="button" data-state="starred" aria-pressed="false">星标</button>
+              <button class="nav-item" type="button" data-state="public" aria-pressed="false">公开</button>
             </nav>
             <div class="list-tools">
               <span id="resultSummary" class="muted" role="status"></span>
@@ -111,8 +112,11 @@
           <span>标题 <small>可选</small></span>
           <input id="titleInput" type="text" maxlength="500" placeholder="留空也可以稍后编辑">
         </label>
+        <details id="pageDescription" class="page-description" hidden>
+          <summary>网页描述</summary><p id="pageDescriptionText"></p>
+        </details>
         <label class="field">
-          <span>备注 <small>可选</small></span>
+          <span>私人备注 <small>仅自己可见</small></span>
           <textarea id="noteInput" maxlength="10000" rows="4" placeholder="为什么保存它？"></textarea>
         </label>
         <label class="field">
@@ -124,7 +128,11 @@
           <label class="check"><input id="starredInput" type="checkbox"><span>星标</span></label>
         </div>
         <label class="check archive-choice" id="archiveChoice"><input id="archiveInput" type="checkbox"><span>归档网页正文 <small>由服务器抓取公开网页，不包含当前浏览器的登录状态</small></span></label>
-        <p class="form-hint">书签仅自己可见。</p>
+        <label class="check archive-choice"><input id="publicInput" type="checkbox"><span>公开展示 <small>公开网址、标题、网页描述和短评；私人备注始终保密</small></span></label>
+        <label class="field public-comment-field" id="publicCommentField" hidden>
+          <span>公开短评 <small>可选，最多 1000 字</small></span>
+          <textarea id="publicCommentInput" maxlength="1000" rows="2" placeholder="向别人推荐这篇内容的理由"></textarea>
+        </label>
         <p id="dialogError" class="form-error" role="alert"></p>
         <div class="dialog-actions">
           <button id="cancelDialogButton" class="button button-ghost" type="button">取消</button>
@@ -147,6 +155,13 @@
         <p class="form-hint">选中的文字会填入备注；未登录时先登录，待保存内容会保留。</p>
       </section>
       <div class="settings-section">
+        <h3>公开书签与通知</h3>
+        <p class="form-hint">公开接口展示最新收藏的六条公开书签。取消公开后接口立即更新，外部展示的更新取决于接收方。</p>
+        <a class="bookmarklet-link" href="/public/bookmarks.json" target="_blank" rel="noopener">查看公开 JSON</a>
+        <p id="publicationStatus" class="form-hint" role="status">正在读取通知状态…</p>
+        <div class="notification-actions"><button id="retryPublicationButton" class="text-button" type="button" disabled>发送更新通知</button><button id="refreshPublicationButton" class="text-button" type="button">刷新状态</button></div>
+      </div>
+      <div class="settings-section">
         <h3>数据与存储</h3>
         <div id="storageStats" class="storage-stats">正在读取…</div>
         <div class="export-actions">
@@ -166,7 +181,7 @@
           </div>
           <button id="closeImportButton" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
-        <p class="settings-copy">支持拾页 JSON、浏览器书签 HTML 和 CSV；单个文件不超过 10 MB、最多 20,000 条。</p>
+        <p class="settings-copy">支持拾页 JSON、浏览器书签 HTML 和 CSV；单个文件不超过 10 MB、最多 20,000 条。导入的新书签默认私密。</p>
         <label class="field">
           <span>书签文件</span>
           <input id="importFile" type="file" accept=".json,.html,.htm,.csv,application/json,text/html,text/csv" required>
