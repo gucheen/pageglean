@@ -75,10 +75,14 @@ func TestPublicationAPISeparatesPublicAndPrivateFields(t *testing.T) {
 func TestWebhookSigningRetryAndNoRestartReplay(t *testing.T) {
 	a, data := newTestApp(t)
 	a.cfg.WebhookURL = "https://hooks.example/notify?token=SECRET_URL"
+	a.cfg.WebhookToken = "receiver-token"
 	a.cfg.WebhookSecret = strings.Repeat("s", 32)
 	var events []string
 	fail := true
 	a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("X-Webhook-Token") != "receiver-token" {
+			t.Fatal("missing webhook authentication token")
+		}
 		body, _ := io.ReadAll(r.Body)
 		mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
 		mac.Write([]byte(r.Header.Get("X-PageGlean-Timestamp") + "."))
@@ -197,6 +201,9 @@ func TestNotificationCoalescingAndChangeDuringDelivery(t *testing.T) {
 	}
 	a.refreshPublication(t.Context(), true)
 	a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
+		if _, present := r.Header["X-Webhook-Token"]; present {
+			t.Fatal("unconfigured token header must be omitted")
+		}
 		b.Public = false
 		if _, err := data.UpdateBookmark(t.Context(), b); err != nil {
 			t.Fatal(err)

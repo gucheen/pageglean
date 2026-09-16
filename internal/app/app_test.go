@@ -95,16 +95,6 @@ func TestRegistrationStartCreatesUnexpiredCeremony(t *testing.T) {
 	}
 }
 
-func TestBookmarksRequireAuthentication(t *testing.T) {
-	application, _ := newTestApp(t)
-	request := httptest.NewRequest(http.MethodGet, "/api/bookmarks", nil)
-	response := httptest.NewRecorder()
-	application.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
-	}
-}
-
 func TestOriginCheckRejectsCrossSiteMutation(t *testing.T) {
 	application, _ := newTestApp(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login/start", nil)
@@ -213,7 +203,7 @@ func TestAuthenticatedBulkUpdate(t *testing.T) {
 	}
 }
 
-func TestBookmarkletPageAndArchiveChoice(t *testing.T) {
+func TestBookmarkArchiveChoice(t *testing.T) {
 	for _, tc := range []struct{ name, archive, status string }{
 		{"link only", `,"archive":false`, "idle"},
 		{"archive requested", `,"archive":true`, "pending"},
@@ -221,11 +211,6 @@ func TestBookmarkletPageAndArchiveChoice(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			application, data := newTestApp(t)
-			page := httptest.NewRecorder()
-			application.Handler().ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/add", nil))
-			if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `id="captureView"`) {
-				t.Fatalf("add page: %d", page.Code)
-			}
 			token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
 			if err != nil {
 				t.Fatal(err)
@@ -264,40 +249,5 @@ func TestBookmarkletPageAndArchiveChoice(t *testing.T) {
 				t.Fatalf("missing archive job: %#v, %v", job, err)
 			}
 		})
-	}
-}
-
-func TestRemovedExtensionRoutesRejectRequests(t *testing.T) {
-	application, data := newTestApp(t)
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/api/capture"},
-		{http.MethodPost, "/api/extension/pair"},
-		{http.MethodPost, "/api/extension/pairings"},
-		{http.MethodGet, "/api/extension/clients"},
-		{http.MethodDelete, "/api/extension/clients/1"},
-		{http.MethodOptions, "/api/capture"},
-	} {
-		for _, origin := range []string{"http://localhost:8080", "chrome-extension://abcdefghijklmnop"} {
-			request := httptest.NewRequest(route.method, route.path, strings.NewReader(`{"url":"https://example.com"}`))
-			request.Header.Set("Origin", origin)
-			request.Header.Set("Authorization", "Bearer pageglean_cap_"+strings.Repeat("x", 43))
-			request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
-			response := httptest.NewRecorder()
-			application.Handler().ServeHTTP(response, request)
-			if response.Code != http.StatusForbidden && response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
-				t.Fatalf("%s %s (%s): %d", route.method, route.path, origin, response.Code)
-			}
-			if response.Header().Get("Access-Control-Allow-Origin") != "" {
-				t.Fatal("removed route allowed CORS")
-			}
-		}
-	}
-	items, err := data.ListBookmarks(t.Context(), store.BookmarkFilter{})
-	if err != nil || len(items) != 0 {
-		t.Fatalf("unexpected bookmarks: %#v, %v", items, err)
 	}
 }

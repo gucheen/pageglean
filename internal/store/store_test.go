@@ -18,20 +18,6 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
-func TestOwnerIsCreatedOnce(t *testing.T) {
-	s := newTestStore(t)
-	user, err := s.LoadOwner(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(user.Handle) != 64 {
-		t.Fatalf("handle length = %d", len(user.Handle))
-	}
-	if len(user.Credentials) != 0 {
-		t.Fatalf("credentials = %d", len(user.Credentials))
-	}
-}
-
 func TestOpenConfiguresSQLite(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

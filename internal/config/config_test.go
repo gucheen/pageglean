@@ -47,3 +47,23 @@ func TestWebhookConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookTokenConfiguration(t *testing.T) {
+	t.Setenv("PAGEGLEAN_WEBHOOK_URL", "https://hooks.example/notify")
+	t.Setenv("PAGEGLEAN_WEBHOOK_SECRET", strings.Repeat("s", 32))
+	t.Setenv("PAGEGLEAN_WEBHOOK_TOKEN", "receiver-token_123")
+	cfg, err := Load()
+	if err != nil || cfg.WebhookToken != "receiver-token_123" {
+		t.Fatalf("token configuration: %v", err)
+	}
+	for _, token := range []string{"secret\r\nInjected: value", " secret", "令牌"} {
+		t.Setenv("PAGEGLEAN_WEBHOOK_TOKEN", token)
+		if _, err := Load(); err == nil || strings.Contains(err.Error(), token) {
+			t.Fatal("invalid token must be rejected without exposing it")
+		}
+	}
+	t.Setenv("PAGEGLEAN_WEBHOOK_TOKEN", "")
+	if _, err := Load(); err != nil {
+		t.Fatal(err)
+	}
+}

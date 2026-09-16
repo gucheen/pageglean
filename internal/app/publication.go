@@ -167,6 +167,9 @@ func (a *App) processPublication(ctx context.Context) error {
 	mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
 	mac.Write([]byte(timestamp + "."))
 	mac.Write(body)
+	if a.cfg.WebhookToken != "" {
+		request.Header.Set("X-Webhook-Token", a.cfg.WebhookToken)
+	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "PageGlean/1.0")
 	request.Header.Set("X-PageGlean-Timestamp", timestamp)

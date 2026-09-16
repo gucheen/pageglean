@@ -11,6 +11,7 @@ import (
 type Config struct {
 	WebhookURL        string
 	WebhookSecret     string
+	WebhookToken      string
 	Addr              string
 	PublicURL         string
 	PublicOrigin      string
@@ -51,12 +52,16 @@ func Load() (Config, error) {
 	}
 	webhookURL := strings.TrimSpace(os.Getenv("PAGEGLEAN_WEBHOOK_URL"))
 	webhookSecret := os.Getenv("PAGEGLEAN_WEBHOOK_SECRET")
+	webhookToken := os.Getenv("PAGEGLEAN_WEBHOOK_TOKEN")
+	if err := ValidateWebhookToken(webhookToken); err != nil {
+		return Config{}, err
+	}
 	if err := ValidateWebhook(webhookURL, webhookSecret); err != nil {
 		return Config{}, err
 	}
 	origin := parsed.Scheme + "://" + parsed.Host
 	return Config{
-		WebhookURL: webhookURL, WebhookSecret: webhookSecret, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
+		WebhookURL: webhookURL, WebhookSecret: webhookSecret, WebhookToken: webhookToken, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
 		PublicURL:         strings.TrimRight(origin, "/"),
 		PublicOrigin:      origin,
 		RPID:              rpID,
@@ -84,6 +89,15 @@ func ValidateWebhook(endpoint, secret string) error {
 	}
 	if len(secret) < 32 {
 		return fmt.Errorf("PAGEGLEAN_WEBHOOK_SECRET must contain at least 32 bytes")
+	}
+	return nil
+}
+
+func ValidateWebhookToken(token string) error {
+	for _, c := range []byte(token) {
+		if c < 0x21 || c > 0x7e {
+			return fmt.Errorf("PAGEGLEAN_WEBHOOK_TOKEN must contain only visible ASCII characters")
+		}
 	}
 	return nil
 }
