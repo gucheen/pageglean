@@ -155,10 +155,12 @@ function setButtonBusy(button, busy, label) {
 
 async function init() {
   try {
-    const status = {
+    let status = {
       authenticated: document.body.dataset.authenticated === "true",
       setupRequired: document.body.dataset.setupRequired === "true",
     };
+    // Cross-site bookmarklet navigation omits Strict cookies; a same-origin request can recover the session.
+    if (!status.authenticated) status = await request("/api/status", { cache: "no-store" });
     if (status.authenticated) {
       showApp();
       await loadBookmarks();
