@@ -154,6 +154,7 @@ function setButtonBusy(button, busy, label) {
 }
 
 async function init() {
+  if (state.capture) return initCapture();
   try {
     let status = {
       authenticated: document.body.dataset.authenticated === "true",
@@ -169,6 +170,21 @@ async function init() {
     showAuth(status);
   } catch (error) {
     showToast(error.message);
+  }
+}
+
+async function initCapture() {
+  $("#captureLoadingMessage").textContent = "正在准备添加书签…";
+  $("#retryCaptureButton").hidden = true;
+  try {
+    const status = document.body.dataset.authenticated === "true"
+      ? { authenticated: true }
+      : await request("/api/status", { cache: "no-store" });
+    if (status.authenticated) showApp();
+    else showAuth(status);
+  } catch (error) {
+    $("#captureLoadingMessage").textContent = "暂时无法打开添加页面，请重试。";
+    $("#retryCaptureButton").hidden = false;
   }
 }
 
@@ -517,6 +533,7 @@ async function retryArchive(id) {
 }
 
 function showCaptureForm() {
+  $("#captureLoading").hidden = true;
   captureView.hidden = false;
   if (!state.captureInitialized) {
     captureView.append(bookmarkDialog);
@@ -758,6 +775,7 @@ $("#emptyAddButton").addEventListener("click", openCreateDialog);
 $("#closeDialogButton").addEventListener("click", cancelBookmark);
 $("#cancelDialogButton").addEventListener("click", cancelBookmark);
 $("#closeCaptureButton").addEventListener("click", cancelBookmark);
+$("#retryCaptureButton").addEventListener("click", initCapture);
 $("#bookmarkForm").addEventListener("submit", submitBookmark);
 $("#selectionModeButton").addEventListener("click", () => {
   state.selecting = !state.selecting;

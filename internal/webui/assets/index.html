@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body data-authenticated="{{.Authenticated}}" data-setup-required="{{.SetupRequired}}">
-    <main id="authView" class="center-shell" {{if .Authenticated}}hidden{{end}}>
+    <main id="authView" class="center-shell" {{if not .ShowAuth}}hidden{{end}}>
       <section class="auth-card">
         <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
         <h1 id="authTitle">用 Passkey 登录</h1>
@@ -85,6 +85,10 @@
 
     <section id="captureView" class="capture-page" {{if not .ShowCapture}}hidden{{end}}>
       <header class="capture-heading"><a href="/" class="brand">拾页</a><span>添加书签</span></header>
+      <div id="captureLoading">
+        <p id="captureLoadingMessage" class="muted" role="status">正在准备添加书签…</p>
+        <button id="retryCaptureButton" class="button button-secondary" type="button" hidden>重试</button>
+      </div>
       <section id="captureSuccess" class="capture-success" role="status" hidden>
         <h1>链接已保存</h1>
         <p id="captureResult"></p>

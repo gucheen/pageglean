@@ -20,8 +20,13 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 		}
 		setupRequired = count == 0
 	}
-	view := struct{ Authenticated, SetupRequired, ShowApp, ShowCapture bool }{
-		authenticated, setupRequired, authenticated && r.URL.Path != "/add", authenticated && r.URL.Path == "/add",
+	capture := r.URL.Path == "/add"
+	view := struct{ Authenticated, SetupRequired, ShowApp, ShowCapture, ShowAuth bool }{
+		Authenticated: authenticated,
+		SetupRequired: setupRequired,
+		ShowApp:       authenticated && !capture,
+		ShowCapture:   capture,
+		ShowAuth:      !authenticated && !capture,
 	}
 	var body bytes.Buffer
 	if err := indexTemplate.Execute(&body, view); err != nil {
