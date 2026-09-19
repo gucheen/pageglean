@@ -91,4 +91,6 @@ blobs/
 
 ## 可选更新通知
 
-设置 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 即可启用公开书签更新通知，两项均留空时关闭。密钥至少 32 字节。接收端需要令牌认证时，可额外设置 `PAGEGLEAN_WEBHOOK_TOKEN`，通知会附带 `Authorization: Bearer <token>` 请求头。通知状态不落库，重启不补发；如需同步，在设置页手动发送。签名协议见[公开书签与更新通知](public-bookmarks.md)。
+默认 `PAGEGLEAN_WEBHOOK_MODE=generic`：设置 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 即可启用公开书签更新通知，两项均留空时关闭。密钥至少 32 字节。接收端需要令牌认证时，可额外设置 `PAGEGLEAN_WEBHOOK_TOKEN`，通知会附带 `Authorization: Bearer <token>` 请求头。
+
+迁移到 Rivet 时设置 `PAGEGLEAN_WEBHOOK_MODE=rivet`，将 `PAGEGLEAN_WEBHOOK_URL` 设为完整触发地址（例如 `https://rivet.example/api/v1/repos/blog/triggers/rebuild`），并设置必需的 `PAGEGLEAN_WEBHOOK_TOKEN`；无需配置签名密钥。该模式发送空 JSON 对象和稳定的幂等键，网络错误或 503 使用同一键重试。配置更改后重启服务。通知状态不落库，重启不补发；如需同步，在设置页手动发送。完整协议及重启、token 轮换对幂等性的影响见[公开书签与更新通知](public-bookmarks.md)。

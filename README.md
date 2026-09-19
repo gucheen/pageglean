@@ -69,7 +69,7 @@ CGO_ENABLED=0 go run ./cmd/pageglean admin verify-backup --input pageglean-backu
 
 添加或编辑书签时，可勾选“公开展示”并填写独立的公开短评。网页描述来自原页面元数据，私人备注始终保持私密。`/public/bookmarks.json` 提供最新收藏的六条公开书签。
 
-可通过 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 配置通用更新通知。通知合并和有限重试仅保存在内存中，重启不补发；需要时在设置里手动发送。字段规则、签名格式和接收方约定见 [公开书签与更新通知](docs/public-bookmarks.md)。
+可通过 `PAGEGLEAN_WEBHOOK_URL` 和 `PAGEGLEAN_WEBHOOK_SECRET` 配置通用更新通知；Rivet 接收端使用 `PAGEGLEAN_WEBHOOK_MODE=rivet`，配置 URL 和 `PAGEGLEAN_WEBHOOK_TOKEN`，无需签名密钥。通知合并和有限重试仅保存在内存中，重启不补发；需要时在设置里手动发送。迁移配置、字段规则、签名格式和接收方约定见 [公开书签与更新通知](docs/public-bookmarks.md)。
 
 ## 导入与批量整理
 

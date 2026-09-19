@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	WebhookMode       string
 	WebhookURL        string
 	WebhookSecret     string
 	WebhookToken      string
@@ -50,18 +51,16 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("resolve PAGEGLEAN_DATA_DIR: %w", err)
 	}
+	webhookMode := envOr("PAGEGLEAN_WEBHOOK_MODE", "generic")
 	webhookURL := strings.TrimSpace(os.Getenv("PAGEGLEAN_WEBHOOK_URL"))
 	webhookSecret := os.Getenv("PAGEGLEAN_WEBHOOK_SECRET")
 	webhookToken := os.Getenv("PAGEGLEAN_WEBHOOK_TOKEN")
-	if err := ValidateWebhookToken(webhookToken); err != nil {
-		return Config{}, err
-	}
-	if err := ValidateWebhook(webhookURL, webhookSecret); err != nil {
+	if err := ValidateWebhookConfig(webhookMode, webhookURL, webhookSecret, webhookToken); err != nil {
 		return Config{}, err
 	}
 	origin := parsed.Scheme + "://" + parsed.Host
 	return Config{
-		WebhookURL: webhookURL, WebhookSecret: webhookSecret, WebhookToken: webhookToken, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
+		WebhookMode: webhookMode, WebhookURL: webhookURL, WebhookSecret: webhookSecret, WebhookToken: webhookToken, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
 		PublicURL:         strings.TrimRight(origin, "/"),
 		PublicOrigin:      origin,
 		RPID:              rpID,
@@ -100,4 +99,29 @@ func ValidateWebhookToken(token string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateWebhookConfig keeps the existing generic protocol as the default.
+func ValidateWebhookConfig(mode, endpoint, secret, token string) error {
+	if err := ValidateWebhookToken(token); err != nil {
+		return err
+	}
+	switch mode {
+	case "", "generic":
+		return ValidateWebhook(endpoint, secret)
+	case "rivet":
+		if endpoint == "" {
+			return nil
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" || parsed.ForceQuery {
+			return fmt.Errorf("PAGEGLEAN_WEBHOOK_URL must be an HTTP(S) URL without credentials, query, or fragment")
+		}
+		if token == "" {
+			return fmt.Errorf("PAGEGLEAN_WEBHOOK_TOKEN is required in rivet mode")
+		}
+		return nil
+	default:
+		return fmt.Errorf("PAGEGLEAN_WEBHOOK_MODE must be generic or rivet")
+	}
 }

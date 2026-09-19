@@ -34,10 +34,7 @@ type App struct {
 const webAuthnCeremonyTimeout = 5 * time.Minute
 
 func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error) {
-	if err := config.ValidateWebhook(cfg.WebhookURL, cfg.WebhookSecret); err != nil {
-		return nil, err
-	}
-	if err := config.ValidateWebhookToken(cfg.WebhookToken); err != nil {
+	if err := config.ValidateWebhookConfig(cfg.WebhookMode, cfg.WebhookURL, cfg.WebhookSecret, cfg.WebhookToken); err != nil {
 		return nil, err
 	}
 	wa, err := webauthn.New(&webauthn.Config{

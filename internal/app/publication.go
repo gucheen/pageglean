@@ -58,9 +58,13 @@ func (a *App) refreshPublication(ctx context.Context, force bool) error {
 		if force {
 			due = time.Now()
 		}
+		previousRevision := a.publication.Revision
 		a.publication.Revision = feed.Revision
 		a.publication.Generation++
-		a.publication.EventID = rand.Text()
+		// A manual retry of an unfinished Rivet delivery must retain its key.
+		if a.cfg.WebhookMode != "rivet" || feed.Revision != previousRevision || a.publication.EventID == "" || (a.publication.DueAt == "" && a.publication.LastError == "") {
+			a.publication.EventID = rand.Text()
+		}
 		a.publication.Attempts = 0
 		a.publication.DueAt = due.UTC().Format(time.RFC3339Nano)
 		a.publication.LastError = ""
@@ -75,7 +79,7 @@ func (a *App) publicationStatus() PublicationNotification {
 }
 
 // A delivery must not clear a newer change or a manual retry that arrived during the request.
-func (a *App) finishPublication(notification PublicationNotification, failure string) {
+func (a *App) finishPublication(notification PublicationNotification, failure string, retryable bool) {
 	a.publicationMu.Lock()
 	defer a.publicationMu.Unlock()
 	if a.publication.Generation != notification.Generation {
@@ -87,7 +91,7 @@ func (a *App) finishPublication(notification PublicationNotification, failure st
 	if failure == "" {
 		a.publication.NotifiedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		a.publication.NotifiedRevision = notification.Revision
-	} else if a.publication.Attempts < 5 {
+	} else if retryable && a.publication.Attempts < 5 {
 		a.publication.DueAt = time.Now().Add(30 * time.Second * time.Duration(1<<notification.Attempts)).UTC().Format(time.RFC3339Nano)
 	}
 }
@@ -152,44 +156,57 @@ func (a *App) processPublication(ctx context.Context) error {
 		return nil
 	}
 	eventID := status.EventID
-	body, err := json.Marshal(map[string]any{
-		"version": 1, "event": "public_bookmarks.changed", "eventId": eventID,
-		"revision": status.Revision, "feedUrl": a.cfg.PublicOrigin + "/public/bookmarks.json",
-	})
-	if err != nil {
-		return err
+	body := []byte("{}")
+	if a.cfg.WebhookMode != "rivet" {
+		body, err = json.Marshal(map[string]any{
+			"version": 1, "event": "public_bookmarks.changed", "eventId": eventID,
+			"revision": status.Revision, "feedUrl": a.cfg.PublicOrigin + "/public/bookmarks.json",
+		})
+		if err != nil {
+			return err
+		}
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.WebhookURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("invalid webhook request")
 	}
-	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
-	mac.Write([]byte(timestamp + "."))
-	mac.Write(body)
+	if a.cfg.WebhookMode == "rivet" {
+		request.Header.Set("Idempotency-Key", eventID)
+	} else {
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		mac := hmac.New(sha256.New, []byte(a.cfg.WebhookSecret))
+		mac.Write([]byte(timestamp + "."))
+		mac.Write(body)
+		request.Header.Set("X-PageGlean-Timestamp", timestamp)
+		request.Header.Set("X-PageGlean-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		request.Header.Set("X-PageGlean-Event-ID", eventID)
+	}
 	if a.cfg.WebhookToken != "" {
 		request.Header.Set("Authorization", "Bearer "+a.cfg.WebhookToken)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", "PageGlean/1.0")
-	request.Header.Set("X-PageGlean-Timestamp", timestamp)
-	request.Header.Set("X-PageGlean-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
-	request.Header.Set("X-PageGlean-Event-ID", eventID)
 	response, err := a.webhookClient.Do(request)
 	failure := ""
+	retryable := true
 	if err != nil {
 		// Transport errors can contain the configured URL, including credentials in its query string.
 		failure = "通知请求失败或超时"
 	} else {
 		io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		response.Body.Close()
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
+		success := response.StatusCode >= 200 && response.StatusCode < 300
+		if a.cfg.WebhookMode == "rivet" {
+			success = response.StatusCode == http.StatusOK || response.StatusCode == http.StatusCreated
+			retryable = response.StatusCode == http.StatusServiceUnavailable
+		}
+		if !success {
 			failure = fmt.Sprintf("通知接收端返回 HTTP %d", response.StatusCode)
 		}
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	a.finishPublication(status, failure)
+	a.finishPublication(status, failure, retryable)
 	return nil
 }

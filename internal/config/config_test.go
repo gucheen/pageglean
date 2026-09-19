@@ -67,3 +67,32 @@ func TestWebhookTokenConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRivetWebhookConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode, url, token string
+		valid                  bool
+	}{
+		{"enabled", "rivet", "https://hooks.example/api/v1/repos/blog/triggers/rebuild", "token", true},
+		{"disabled", "rivet", "", "", true},
+		{"missing token", "rivet", "https://hooks.example/trigger", "", false},
+		{"query", "rivet", "https://hooks.example/trigger?token=secret", "token", false},
+		{"credentials", "rivet", "https://user:secret@hooks.example/trigger", "token", false},
+		{"invalid token", "rivet", "https://hooks.example/trigger", "bad token", false},
+		{"unknown mode", "other", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateWebhookConfig(tc.mode, tc.url, "", tc.token); (err == nil) != tc.valid {
+				t.Fatalf("validation: %v", err)
+			}
+		})
+	}
+	t.Setenv("PAGEGLEAN_WEBHOOK_MODE", "rivet")
+	t.Setenv("PAGEGLEAN_WEBHOOK_URL", "https://hooks.example/api/v1/repos/blog/triggers/rebuild")
+	t.Setenv("PAGEGLEAN_WEBHOOK_TOKEN", "token")
+	t.Setenv("PAGEGLEAN_WEBHOOK_SECRET", "")
+	cfg, err := Load()
+	if err != nil || cfg.WebhookMode != "rivet" {
+		t.Fatalf("load rivet configuration: %v", err)
+	}
+}

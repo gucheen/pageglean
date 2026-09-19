@@ -232,3 +232,118 @@ func TestImportedPublicFieldsRemainPrivate(t *testing.T) {
 		t.Fatalf("import: %#v", items)
 	}
 }
+
+func TestRivetDeliveryProtocolAndRetry(t *testing.T) {
+	a, data := newTestApp(t)
+	a.cfg.WebhookMode = "rivet"
+	a.cfg.WebhookURL = "https://hooks.example/api/v1/repos/blog/triggers/rebuild"
+	a.cfg.WebhookToken = "rivet-token"
+	if _, err := New(a.cfg, data, a.logger); err != nil {
+		t.Fatal(err)
+	}
+	code := 503
+	networkFailure := false
+	var keys []string
+	a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || string(body) != "{}" || r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("invalid Rivet request: %s, %v", body, err)
+		}
+		if r.URL.Path != "/api/v1/repos/blog/triggers/rebuild" || r.Header.Get("Authorization") != "Bearer rivet-token" {
+			t.Fatal("wrong target or authentication")
+		}
+		for _, header := range []string{"X-PageGlean-Signature", "X-PageGlean-Timestamp", "X-PageGlean-Event-ID"} {
+			if r.Header.Get(header) != "" {
+				t.Fatal("unexpected legacy header")
+			}
+		}
+		key := r.Header.Get("Idempotency-Key")
+		if len(key) < 1 || len(key) > 128 {
+			t.Fatal("invalid key length")
+		}
+		for _, c := range key {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+				t.Fatal("invalid key character")
+			}
+		}
+		keys = append(keys, key)
+		if networkFailure {
+			return nil, errors.New("secret transport detail")
+		}
+		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader("{}")), Header: make(http.Header)}, nil
+	})
+	send := func(manual bool) {
+		t.Helper()
+		if manual {
+			if err := a.refreshPublication(t.Context(), true); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			a.publicationMu.Lock()
+			a.publication.DueAt = time.Now().Add(-time.Second).Format(time.RFC3339Nano)
+			a.publicationMu.Unlock()
+		}
+		if err := a.processPublication(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send(true)
+	if a.publicationStatus().DueAt == "" {
+		t.Fatal("503 must retry")
+	}
+	networkFailure = true
+	send(false)
+	if a.publicationStatus().DueAt == "" || strings.Contains(a.publicationStatus().LastError, "secret") {
+		t.Fatal("network retry or redaction failed")
+	}
+	networkFailure = false
+	code = 201
+	send(true)
+	if keys[0] != keys[1] || keys[0] != keys[2] {
+		t.Fatal("automatic and manual retries must retain key")
+	}
+	if a.publicationStatus().NotifiedAt == "" || a.publicationStatus().DueAt != "" {
+		t.Fatal("201 must succeed")
+	}
+	code = 200
+	send(true)
+	if keys[3] == keys[2] {
+		t.Fatal("explicit send after success must create new delivery")
+	}
+	if a.publicationStatus().LastError != "" || a.publicationStatus().DueAt != "" {
+		t.Fatal("200 must succeed")
+	}
+	for _, statusCode := range []int{400, 401, 413, 415, 422, 204, 302, 500} {
+		code = statusCode
+		send(true)
+		status := a.publicationStatus()
+		if status.LastError == "" || status.DueAt != "" {
+			t.Fatalf("HTTP %d must stop automatic retries", code)
+		}
+	}
+	failedKey := keys[len(keys)-1]
+	code = 201
+	send(true)
+	if keys[len(keys)-1] != failedKey {
+		t.Fatal("retry after configuration repair must retain key")
+	}
+	if err := a.refreshPublication(t.Context(), true); err != nil {
+		t.Fatal(err)
+	}
+	pending := a.publicationStatus()
+	_, _, err := data.CreateBookmark(t.Context(), store.Bookmark{URL: "https://example.com/new", CanonicalURL: "https://example.com/new", Public: true, SkipArchive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.refreshPublication(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+	newer := a.publicationStatus()
+	if newer.EventID == pending.EventID {
+		t.Fatal("new content must create new key")
+	}
+	a.finishPublication(pending, "", true)
+	if a.publicationStatus().DueAt == "" {
+		t.Fatal("old delivery cleared newer change")
+	}
+}

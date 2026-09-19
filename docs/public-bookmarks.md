@@ -43,7 +43,30 @@
 
 取消公开或删除后接口立即更新，并用下一条公开书签补齐。外部服务保存过的副本需要由接收方自行更新。
 
-## 通用 Webhook
+## Rivet 构建触发 Webhook
+
+迁移到 Rivet 时配置：
+
+```sh
+PAGEGLEAN_WEBHOOK_MODE=rivet
+PAGEGLEAN_WEBHOOK_URL=https://rivet.example/api/v1/repos/blog/triggers/rebuild
+PAGEGLEAN_WEBHOOK_TOKEN=your-rivet-token
+```
+
+URL 替换为 TLS 反向代理上的完整触发地址，token 仅放在认证请求头中，URL 不允许包含查询参数或凭据。代理需要保留 `Authorization` 和 `Idempotency-Key`，避免记录其值。此模式不需要 `PAGEGLEAN_WEBHOOK_SECRET`，已有的签名密钥会被忽略。URL 留空时关闭通知。Compose 已透传模式、URL 和 token。
+
+每次发送 `POST`，请求体固定为两个字节 `{}`，`Content-Type: application/json`，附带 `Authorization: Bearer <token>` 和 `Idempotency-Key: <事件 ID>`。不发送旧协议的事件字段或签名头，也不发送 command、ref、revision、环境变量或 secret。仓库默认分支与 pipeline 由接收端配置；构建流程需要自行从 PageGlean 的 `/public/bookmarks.json` 拉取数据。
+
+沿用下文的启动不补发、30 秒合并、10 秒请求超时和最多五次尝试，但响应与重试规则如下：
+
+- 仅 HTTP 200 / 201 表示触发送达，包括接收端返回原 Run 的幂等响应；不表示构建成功或完成。
+- 网络错误或 HTTP 503 自动重试，始终复用同一事件 ID。其他状态停止自动重试，设置页显示 HTTP 错误码，不显示响应内部详情。
+- 在途、待发送或失败的同一内容版本，点击“发送更新通知”仍使用原 ID；修复 422 对应的默认分支或配置后，可以这样重试。收到成功响应后再次手动发送，或公开内容版本变化，才生成新 ID。
+- ID 和通知状态仍仅保存在内存中。重启不补发，重启后的手动发送会生成新 ID；若上次响应丢失但接收端已创建任务，可能创建另一任务。轮换 token 后，接收端也会将投递视为新请求。
+
+`PAGEGLEAN_WEBHOOK_MODE` 默认是 `generic`，以下为保留的原协议。切换模式和部署配置后需要重启服务，可在设置页手动发送一次验证接收端。
+
+## 通用 Webhook（generic 模式）
 
 Webhook 只通知“公开接口内容已变化”，不调用 Git、构建平台或部署工具。接收方可以据此刷新页面、同步数据、发送消息或执行自己的流程。
 
