@@ -47,7 +47,7 @@ func run(args []string) error {
 }
 
 func serve(cfg config.Config, data *store.Store) error {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	application, err := app.New(cfg, data, logger)
 	if err != nil {
 		return err

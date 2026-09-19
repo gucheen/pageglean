@@ -1,12 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -345,5 +347,80 @@ func TestRivetDeliveryProtocolAndRetry(t *testing.T) {
 	a.finishPublication(pending, "", true)
 	if a.publicationStatus().DueAt == "" {
 		t.Fatal("old delivery cleared newer change")
+	}
+}
+
+func TestWebhookFailureLogs(t *testing.T) {
+	for _, tc := range []struct {
+		name, mode                string
+		code                      int
+		transportError, retryable bool
+	}{
+		{"network", "rivet", 0, true, true},
+		{"unprocessable", "rivet", 422, false, false},
+		{"unavailable", "rivet", 503, false, true},
+		{"generic", "", 500, false, true},
+		{"success", "rivet", 201, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _ := newTestApp(t)
+			a.cfg.WebhookMode = tc.mode
+			a.cfg.WebhookURL = "https://hooks.example/SECRET_PATH?token=SECRET_QUERY"
+			a.cfg.WebhookToken = "SECRET_TOKEN"
+			a.cfg.WebhookSecret = "SECRET_SIGNING_KEY"
+			var logs bytes.Buffer
+			a.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			a.webhookClient.Transport = publicationTransport(func(r *http.Request) (*http.Response, error) {
+				if tc.transportError {
+					return nil, errors.New("SECRET_TRANSPORT " + r.URL.String())
+				}
+				return &http.Response{StatusCode: tc.code, Body: io.NopCloser(strings.NewReader("pipeline unavailable: " + a.cfg.WebhookToken + " " + a.cfg.WebhookSecret + " " + a.publicationStatus().EventID)), Header: make(http.Header)}, nil
+			})
+			if err := a.refreshPublication(t.Context(), true); err != nil {
+				t.Fatal(err)
+			}
+			eventID := a.publicationStatus().EventID
+			if err := a.processPublication(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if tc.code == 201 {
+				if logs.Len() != 0 {
+					t.Fatal("successful delivery must not log an error")
+				}
+				return
+			}
+			var entry map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+				t.Fatal(err)
+			}
+			mode := tc.mode
+			if mode == "" {
+				mode = "generic"
+			}
+			if entry["level"] != "ERROR" || entry["msg"] != "webhook request failed" || entry["mode"] != mode || entry["attempt"] != float64(1) || entry["status_code"] != float64(tc.code) || entry["retryable"] != tc.retryable || entry["error"] == "" {
+				t.Fatalf("unexpected log: %s", logs.String())
+			}
+			if !tc.transportError && entry["response_body"] != "pipeline unavailable: [REDACTED] [REDACTED] [REDACTED]" {
+				t.Fatalf("missing response diagnostics: %s", logs.String())
+			}
+			if strings.Contains(logs.String(), "SECRET_") || strings.Contains(logs.String(), eventID) {
+				t.Fatal("webhook log exposed sensitive values")
+			}
+		})
+	}
+}
+
+func TestWebhookResponseExcerptLimit(t *testing.T) {
+	body, truncated := webhookResponseExcerpt([]byte(strings.Repeat("x", 5000)), "token")
+	if len(body) != 4096 || !truncated {
+		t.Fatal("response must be bounded")
+	}
+	body, truncated = webhookResponseExcerpt([]byte("invalid pipeline"), "token", "")
+	if body != "invalid pipeline" || truncated {
+		t.Fatal("short response changed")
+	}
+	body, truncated = webhookResponseExcerpt([]byte(strings.Repeat("x", 4085)+"SECRET_TOKEN"), "SECRET_TOKEN_LONGER")
+	if strings.Contains(body, "SECRET_") || !truncated {
+		t.Fatal("partial credential leaked at read boundary")
 	}
 }

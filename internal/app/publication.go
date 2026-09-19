@@ -189,11 +189,18 @@ func (a *App) processPublication(ctx context.Context) error {
 	response, err := a.webhookClient.Do(request)
 	failure := ""
 	retryable := true
+	statusCode := 0
+	responseBody := ""
+	responseTruncated := false
+	responseReadFailed := false
 	if err != nil {
 		// Transport errors can contain the configured URL, including credentials in its query string.
 		failure = "通知请求失败或超时"
 	} else {
-		io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		statusCode = response.StatusCode
+		body, readErr := io.ReadAll(io.LimitReader(response.Body, 4097))
+		responseReadFailed = readErr != nil
+		responseBody, responseTruncated = webhookResponseExcerpt(body, a.cfg.WebhookToken, a.cfg.WebhookSecret, eventID)
 		response.Body.Close()
 		success := response.StatusCode >= 200 && response.StatusCode < 300
 		if a.cfg.WebhookMode == "rivet" {
@@ -207,6 +214,43 @@ func (a *App) processPublication(ctx context.Context) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if failure != "" {
+		mode := a.cfg.WebhookMode
+		if mode == "" {
+			mode = "generic"
+		}
+		// Do not log the URL, headers, or raw transport error:
+		// they may contain credentials or the idempotency key.
+		a.logger.Error("webhook request failed", "mode", mode,
+			"attempt", status.Attempts+1, "status_code", statusCode,
+			"retryable", retryable, "error", failure,
+			"response_body", responseBody, "response_truncated", responseTruncated,
+			"response_read_failed", responseReadFailed)
+	}
 	a.finishPublication(status, failure, retryable)
 	return nil
+}
+
+func webhookResponseExcerpt(body []byte, secrets ...string) (string, bool) {
+	const limit = 4096
+	truncated := len(body) > limit
+	excerpt := string(body)
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		excerpt = strings.ReplaceAll(excerpt, secret, "[REDACTED]")
+		// A bounded read may end in the middle of an echoed credential.
+		for n := min(len(secret)-1, len(excerpt)); truncated && n > 0; n-- {
+			if strings.HasSuffix(excerpt, secret[:n]) {
+				excerpt = excerpt[:len(excerpt)-n] + "[REDACTED]"
+				break
+			}
+		}
+	}
+	if len(excerpt) > limit {
+		excerpt = excerpt[:limit]
+		truncated = true
+	}
+	return excerpt, truncated
 }

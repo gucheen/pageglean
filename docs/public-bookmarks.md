@@ -45,6 +45,8 @@
 
 ## Rivet 构建触发 Webhook
 
+两种 Webhook 模式的请求失败均写入 stderr JSON 日志，消息为 `webhook request failed`，包含 `mode`、`attempt`、`status_code`、`retryable` 和脱敏错误描述。网络错误的 `status_code` 为 `0`；`retryable` 表示错误是否允许重试，实际发送仍受五次尝试上限及后续内容变化约束。失败日志还包含 `response_body`（最多 4 KiB）、`response_truncated` 和 `response_read_failed`，方便排查接收端错误。正文中已知的 token、签名密钥和幂等键原文会替换为 `[REDACTED]`，请求 URL 和认证头不直接记录。成功请求不记录此错误日志。
+
 迁移到 Rivet 时配置：
 
 ```sh
