@@ -18,6 +18,7 @@ func (a *App) handleImportPreview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	applyImportDestination(result.Items, r.FormValue("destination"))
 	prepared, invalid := prepareImportedItems(result.Items, false)
 	preview := prepared
 	if len(preview) > 10 {
@@ -40,6 +41,7 @@ func (a *App) handleImportCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	archive := strings.EqualFold(strings.TrimSpace(r.FormValue("archive")), "true")
+	applyImportDestination(result.Items, r.FormValue("destination"))
 	prepared, invalid := prepareImportedItems(result.Items, !archive)
 	created := 0
 	duplicates := 0
@@ -95,11 +97,12 @@ func prepareImportedItems(items []importer.Item, skipArchive bool) ([]store.Book
 	invalid := 0
 	for _, item := range items {
 		original, canonical, err := bookmarks.NormalizeURL(item.URL)
-		if err != nil || len(item.Title) > 500 || len(item.Note) > 10_000 || len(item.Description) > 10_000 || len([]rune(item.PublicComment)) > 1000 || !validImportTags(item.Tags) {
+		if err != nil || len(item.Title) > 500 || len(item.Note) > 10_000 || len(item.Description) > 10_000 || len([]rune(item.PublicComment)) > 1000 || !validImportTags(item.Tags) || len([]rune(item.HomeTitle)) > 100 || len([]rune(item.HomeGroup)) > 50 || item.HomeOrder < 0 || item.HomeOrder > 1000000 {
 			invalid++
 			continue
 		}
 		prepared = append(prepared, store.Bookmark{
+			Home: item.Home, Library: item.Library, HomeTitle: strings.TrimSpace(item.HomeTitle), HomeGroup: strings.TrimSpace(item.HomeGroup), HomeOrder: item.HomeOrder, HomePinned: item.HomePinned,
 			URL: original, CanonicalURL: canonical, Title: strings.TrimSpace(item.Title),
 			Description: strings.TrimSpace(item.Description), PublicComment: strings.TrimSpace(item.PublicComment),
 			Note: strings.TrimSpace(item.Note), Tags: item.Tags, Unread: item.Unread, Starred: item.Starred,
@@ -119,4 +122,19 @@ func validImportTags(tags []string) bool {
 		}
 	}
 	return true
+}
+
+func applyImportDestination(items []importer.Item, destination string) {
+	for i := range items {
+		switch destination {
+		case "home":
+			items[i].Home, items[i].Library = true, false
+		case "library":
+			items[i].Home, items[i].Library = false, true
+		default:
+			if !items[i].Home && !items[i].Library {
+				items[i].Library = true
+			}
+		}
+	}
 }

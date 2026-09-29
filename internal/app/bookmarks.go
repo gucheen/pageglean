@@ -10,6 +10,13 @@ import (
 )
 
 type createBookmarkRequest struct {
+	Home       bool   `json:"home"`
+	Library    bool   `json:"library"`
+	HomeTitle  string `json:"homeTitle"`
+	HomeGroup  string `json:"homeGroup"`
+	HomeOrder  int    `json:"homeOrder"`
+	HomePinned bool   `json:"homePinned"`
+
 	Description   string   `json:"description"`
 	Public        bool     `json:"public"`
 	PublicComment string   `json:"publicComment"`
@@ -23,6 +30,13 @@ type createBookmarkRequest struct {
 }
 
 type updateBookmarkRequest struct {
+	Home       *bool   `json:"home"`
+	Library    *bool   `json:"library"`
+	HomeTitle  *string `json:"homeTitle"`
+	HomeGroup  *string `json:"homeGroup"`
+	HomeOrder  *int    `json:"homeOrder"`
+	HomePinned *bool   `json:"homePinned"`
+
 	Public        *bool     `json:"public"`
 	PublicComment *string   `json:"publicComment"`
 	Title         *string   `json:"title"`
@@ -33,6 +47,8 @@ type updateBookmarkRequest struct {
 }
 
 type bulkBookmarkRequest struct {
+	Home       *bool    `json:"home"`
+	Library    *bool    `json:"library"`
 	IDs        []int64  `json:"ids"`
 	AddTags    []string `json:"addTags"`
 	RemoveTags []string `json:"removeTags"`
@@ -49,12 +65,17 @@ func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "标题、备注或公开短评过长")
 		return
 	}
+	if len([]rune(input.HomeTitle)) > 100 || len([]rune(input.HomeGroup)) > 50 || input.HomeOrder < 0 || input.HomeOrder > 1000000 {
+		writeError(w, http.StatusBadRequest, "首页名称、分组或排序无效")
+		return
+	}
 	original, canonical, err := bookmarks.NormalizeURL(input.URL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	created, duplicate, err := a.store.CreateBookmark(r.Context(), store.Bookmark{
+		Home: input.Home, Library: input.Library, HomeTitle: strings.TrimSpace(input.HomeTitle), HomeGroup: strings.TrimSpace(input.HomeGroup), HomeOrder: input.HomeOrder, HomePinned: input.HomePinned,
 		URL:          original,
 		CanonicalURL: canonical,
 		Title:        strings.TrimSpace(input.Title),
@@ -63,7 +84,7 @@ func (a *App) handleBookmarksCreate(w http.ResponseWriter, r *http.Request) {
 		Tags:         input.Tags,
 		Unread:       input.Unread,
 		Starred:      input.Starred,
-		SkipArchive:  input.Archive != nil && !*input.Archive,
+		SkipArchive:  (input.Archive != nil && !*input.Archive) || (input.Home && input.Archive == nil),
 		Public:       input.Public, PublicComment: strings.TrimSpace(input.PublicComment),
 	})
 	if err != nil {
@@ -81,7 +102,7 @@ func (a *App) handleBookmarksList(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	items, err := a.store.ListBookmarks(r.Context(), store.BookmarkFilter{
-		Query: r.URL.Query().Get("q"),
+		Scope: r.URL.Query().Get("scope"), Query: r.URL.Query().Get("q"),
 		State: r.URL.Query().Get("state"),
 		Limit: limit, Offset: offset,
 	})
@@ -144,6 +165,28 @@ func (a *App) handleBookmarksUpdate(w http.ResponseWriter, r *http.Request) {
 	if input.Starred != nil {
 		bookmark.Starred = *input.Starred
 	}
+	if input.Home != nil {
+		bookmark.Home = *input.Home
+	}
+	if input.Library != nil {
+		bookmark.Library = *input.Library
+	}
+	if input.HomeTitle != nil {
+		bookmark.HomeTitle = strings.TrimSpace(*input.HomeTitle)
+	}
+	if input.HomeGroup != nil {
+		bookmark.HomeGroup = strings.TrimSpace(*input.HomeGroup)
+	}
+	if input.HomeOrder != nil {
+		bookmark.HomeOrder = *input.HomeOrder
+	}
+	if input.HomePinned != nil {
+		bookmark.HomePinned = *input.HomePinned
+	}
+	if (!bookmark.Home && !bookmark.Library) || len([]rune(bookmark.HomeTitle)) > 100 || len([]rune(bookmark.HomeGroup)) > 50 || bookmark.HomeOrder < 0 || bookmark.HomeOrder > 1000000 {
+		writeError(w, http.StatusBadRequest, "请保留至少一个保存位置，并检查首页名称、分组和排序")
+		return
+	}
 	updated, err := a.store.UpdateBookmark(r.Context(), bookmark)
 	if err != nil {
 		a.internalError(w, r, err)
@@ -176,12 +219,12 @@ func (a *App) handleBookmarksBulkUpdate(w http.ResponseWriter, r *http.Request) 
 	if !validateBulkRequest(w, input) {
 		return
 	}
-	if len(input.AddTags) == 0 && len(input.RemoveTags) == 0 && input.Unread == nil && input.Starred == nil {
+	if len(input.AddTags) == 0 && len(input.RemoveTags) == 0 && input.Unread == nil && input.Starred == nil && input.Home == nil && input.Library == nil {
 		writeError(w, http.StatusBadRequest, "没有需要批量修改的字段")
 		return
 	}
 	updated, err := a.store.BulkUpdateBookmarks(r.Context(), input.IDs, store.BulkBookmarkPatch{
-		AddTags: input.AddTags, RemoveTags: input.RemoveTags, Unread: input.Unread, Starred: input.Starred,
+		Home: input.Home, Library: input.Library, AddTags: input.AddTags, RemoveTags: input.RemoveTags, Unread: input.Unread, Starred: input.Starred,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

@@ -15,7 +15,7 @@
       <section class="auth-card">
         <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
         <h1 id="authTitle">用 Passkey 登录</h1>
-        <p id="authDescription" class="auth-description">登录后管理全部书签；只有你主动公开的书签可供访客查看。</p>
+        <p id="authDescription" class="auth-description">登录后使用书签首页和资料库；只有你主动公开的书签可供访客查看。</p>
         <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
         <div id="setupHelp" class="setup-help" hidden>
           <p>应用尚未初始化。请先在服务器执行：</p>
@@ -39,29 +39,38 @@
         <div class="topbar-actions">
           <button id="addButton" class="text-button" type="button">添加</button>
           <button id="settingsButton" class="text-button" type="button">设置</button>
-          <button id="logoutButton" class="text-button" type="button">退出</button>
         </div>
       </header>
 
       <main class="content">
           <div class="list-toolbar">
-            <nav aria-label="书签筛选">
-              <button class="nav-item active" type="button" data-state="" aria-pressed="true">全部</button>
-              <button class="nav-item" type="button" data-state="unread" aria-pressed="false">稍后读</button>
-              <button class="nav-item" type="button" data-state="starred" aria-pressed="false">星标</button>
-              <button class="nav-item" type="button" data-state="public" aria-pressed="false">公开</button>
+            <nav class="workspace-tabs" aria-label="内容区域">
+              <a href="/" data-scope="home">书签</a>
+              <a href="/library" data-scope="library">资料库</a>
+              <a href="/all" data-scope="all">全部</a>
             </nav>
-            <div class="list-tools">
-              <span id="resultSummary" class="muted" role="status"></span>
-              <button id="selectionModeButton" class="text-button" type="button" aria-pressed="false">选择</button>
+            <div class="workspace-tools">
+              <nav id="libraryFilters" aria-label="资料筛选">
+                <button class="nav-item active" type="button" data-state="" aria-pressed="true">全部</button>
+                <button class="nav-item" type="button" data-state="unread" aria-pressed="false">稍后读</button>
+                <button class="nav-item" type="button" data-state="starred" aria-pressed="false">星标</button>
+                <button class="nav-item" type="button" data-state="public" aria-pressed="false">公开</button>
+              </nav>
+              <div class="list-tools">
+                <span id="resultSummary" class="muted" role="status"></span>
+                <button id="manageHomeButton" class="text-button" type="button" aria-label="整理首页" aria-pressed="false">整理</button>
+                <button id="selectionModeButton" class="text-button" type="button" aria-pressed="false">选择</button>
+              </div>
             </div>
           </div>
-          <h1 id="listTitle" class="sr-only">全部书签</h1>
+          <h2 id="listTitle" class="sr-only">已保存的链接</h2>
 
           <div id="bulkBar" class="bulk-bar" hidden>
             <strong id="selectionCount">已选择 0 条</strong>
             <div class="bulk-actions">
               <button id="selectPageButton" class="text-button" type="button">选择本页</button>
+              <button class="text-button" type="button" data-bulk-place="home">添加到首页</button>
+              <button class="text-button" type="button" data-bulk-place="library">加入资料库</button>
               <button class="text-button" type="button" data-bulk-state="unread">稍后阅读</button>
               <button class="text-button" type="button" data-bulk-state="read">标为已读</button>
               <button class="text-button" type="button" data-bulk-state="starred">星标</button>
@@ -73,7 +82,9 @@
             </div>
           </div>
 
+          <section id="homeGrid" class="home-groups" hidden></section>
           <section id="bookmarkList" class="bookmark-list" aria-live="polite"></section>
+          <button id="loadMoreButton" class="button button-ghost load-more" type="button" hidden>加载更多</button>
 
           <section id="emptyState" class="empty-state" hidden>
 
@@ -93,7 +104,7 @@
       <section id="captureSuccess" class="capture-success" role="status" hidden>
         <h1>链接已保存</h1>
         <p id="captureResult"></p>
-        <p><a href="/">查看书签</a> · <button id="closeCaptureButton" class="text-button" type="button">关闭窗口</button></p>
+        <p><a href="/">查看书签首页</a> · <button id="closeCaptureButton" class="text-button" type="button">关闭窗口</button></p>
       </section>
     </section>
 
@@ -106,6 +117,18 @@
           <button id="closeDialogButton" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
         <input id="bookmarkId" type="hidden">
+        <fieldset class="destination-fields"><legend>保存位置</legend><div class="check-row">
+          <label class="check"><input id="homeInput" type="checkbox">书签首页</label>
+          <label class="check"><input id="libraryInput" type="checkbox" checked>资料库</label>
+        </div></fieldset>
+        <div id="homeFields" hidden>
+          <label class="field"><span>首页简称 <small>可选，不改变原始标题</small></span><input id="homeTitleInput" maxlength="100" placeholder="例如：GitHub"></label>
+          <div class="home-field-row">
+            <label class="field"><span>分组</span><input id="homeGroupInput" maxlength="50" placeholder="未分组" list="homeGroupSuggestions"><datalist id="homeGroupSuggestions"></datalist></label>
+            <label class="field"><span>组内顺序 <small>数字越小越靠前</small></span><input id="homeOrderInput" type="number" min="0" max="1000000" step="1" value="0"></label>
+          </div>
+          <label class="check"><input id="homePinnedInput" type="checkbox">置顶到常用区</label>
+        </div>
         <label class="field" id="urlField">
           <span>网址</span>
           <input id="urlInput" type="url" required placeholder="https://example.com/article" autocomplete="url">
@@ -115,11 +138,12 @@
           <input id="titleInput" type="text" maxlength="500" placeholder="留空也可以稍后编辑">
         </label>
         <details id="pageDescription" class="page-description" hidden>
-          <summary>网页描述</summary><p id="pageDescriptionText"></p>
+          <summary>原网页简介 <span class="source-hint">来自原网站</span></summary><p id="pageDescriptionText"></p>
         </details>
+        <div id="libraryFields">
         <label class="field">
-          <span>私人备注 <small>仅自己可见</small></span>
-          <textarea id="noteInput" maxlength="10000" rows="4" placeholder="为什么保存它？"></textarea>
+          <span>我的笔记 <small>仅自己可见</small></span>
+          <textarea id="noteInput" maxlength="10000" rows="4" placeholder="记录想法或摘录，仅自己可见"></textarea>
         </label>
         <label class="field">
           <span>标签 <small>用逗号分隔</small></span>
@@ -129,12 +153,17 @@
           <label class="check"><input id="unreadInput" type="checkbox"><span>稍后阅读</span></label>
           <label class="check"><input id="starredInput" type="checkbox"><span>星标</span></label>
         </div>
+        </div>
         <label class="check archive-choice" id="archiveChoice"><input id="archiveInput" type="checkbox"><span>归档网页正文 <small>由服务器抓取公开网页，不包含当前浏览器的登录状态</small></span></label>
-        <label class="check archive-choice"><input id="publicInput" type="checkbox"><span>公开展示 <small>公开网址、标题、网页描述和短评；私人备注始终保密</small></span></label>
-        <label class="field public-comment-field" id="publicCommentField" hidden>
-          <span>公开短评 <small>可选，最多 1000 字</small></span>
-          <textarea id="publicCommentInput" maxlength="1000" rows="2" placeholder="向别人推荐这篇内容的理由"></textarea>
-        </label>
+        <fieldset class="recommendation-settings">
+          <legend>公开推荐</legend>
+          <label class="check"><input id="publicInput" type="checkbox" aria-controls="publicCommentField"><span>在公开页展示</span></label>
+          <p class="form-hint">公开页展示链接、标题和推荐理由。我的笔记仅自己可见。</p>
+          <label class="field public-comment-field" id="publicCommentField" hidden>
+            <span>推荐理由 <small>写给访客，可选，最多 1000 字</small></span>
+            <textarea id="publicCommentInput" maxlength="1000" rows="2" placeholder="告诉别人为什么值得看"></textarea>
+          </label>
+        </fieldset>
         <p id="dialogError" class="form-error" role="alert"></p>
         <div class="dialog-actions">
           <button id="cancelDialogButton" class="button button-ghost" type="button">取消</button>
@@ -151,10 +180,15 @@
         <button id="closeSettingsButton" class="icon-button" type="button" aria-label="关闭">×</button>
       </div>
       <section class="bookmarklet-settings">
+        <h3>浏览器起始页</h3>
+        <p class="settings-copy">将本站首页地址设为浏览器主页或启动页。新标签页的设置方式取决于浏览器。</p>
+        <a id="homeURL" class="bookmarklet-link" href="/">打开书签首页</a>
+      </section>
+      <section class="bookmarklet-settings">
         <h3>书签栏快捷方式</h3>
-        <p class="settings-copy">把下面的链接拖到浏览器书签栏。浏览网页时点击它，即可修改网址、标题、备注和标签后保存。</p>
+        <p class="settings-copy">把下面的链接拖到浏览器书签栏。浏览网页时点击它，即可修改网址、标题、笔记和标签后保存。</p>
         <a id="bookmarkletLink" class="bookmarklet-link" draggable="true">保存到拾页</a>
-        <p class="form-hint">选中的文字会填入备注；未登录时先登录，待保存内容会保留。</p>
+        <p class="form-hint">选中的文字会填入我的笔记；未登录时先登录，待保存内容会保留。</p>
       </section>
       <div class="settings-section">
         <h3>公开书签与通知</h3>
@@ -172,6 +206,9 @@
           <a class="button button-ghost" href="/api/export?format=csv">导出 CSV</a>
           <a class="button button-ghost" href="/api/export?format=html">导出浏览器书签</a>
         </div>
+      </div>
+      <div class="settings-section">
+        <button id="logoutButton" class="text-button" type="button">退出登录</button>
       </div>
     </dialog>
 
@@ -193,6 +230,7 @@
           <p class="muted">网址列必选，其他字段可以留空。</p>
           <div id="mappingFields" class="mapping-fields"></div>
         </div>
+        <label class="field"><span>导入位置</span><select id="importDestination"><option value="preserve">保留文件中的位置（未指定时进入资料库）</option><option value="home">书签首页</option><option value="library">资料库</option></select></label>
         <label class="check import-archive-option">
           <input id="importArchive" type="checkbox">
           <span>导入后逐条归档正文 <small>低配 VPS 建议保持关闭</small></span>

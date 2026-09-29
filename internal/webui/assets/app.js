@@ -1,6 +1,9 @@
 const state = {
+  scope: location.pathname === "/library" ? "library" : location.pathname === "/all" ? "all" : "home",
+  managingHome: false,
+  hasMore: false,
   filter: "",
-  query: "",
+  query: new URLSearchParams(location.search).get("q") || "",
   bookmarks: [],
   selected: new Set(),
   selecting: false,
@@ -21,6 +24,7 @@ const settingsDialog = $("#settingsDialog");
 const importDialog = $("#importDialog");
 const captureView = $("#captureView");
 const captureParams = new URLSearchParams(location.hash.slice(1) || location.search);
+let bookmarkLoadVersion = 0;
 let searchTimer;
 let toastTimer;
 let importPreviewVersion = 0;
@@ -208,7 +212,7 @@ function showAuth(status) {
     setupHelp.hidden = false;
   } else {
     $("#authTitle").textContent = "用 Passkey 登录";
-    $("#authDescription").textContent = "登录后管理全部书签；只有你主动公开的书签可供访客查看。";
+    $("#authDescription").textContent = "登录后使用书签首页和资料库；只有你主动公开的书签可供访客查看。";
     authButton.textContent = "使用 Passkey";
     authButton.hidden = false;
     setupHelp.hidden = true;
@@ -222,15 +226,18 @@ function showApp() {
   if (state.capture) showCaptureForm();
 }
 
-async function loadBookmarks() {
+async function loadBookmarks(append = false) {
   if (state.capture) return;
-  const params = new URLSearchParams();
+  const version = ++bookmarkLoadVersion;
+  const params = new URLSearchParams({ scope: state.scope, offset: String(append ? state.bookmarks.length : 0) });
   if (state.query) params.set("q", state.query);
   if (state.filter) params.set("state", state.filter);
   params.set("limit", "100");
   try {
     const payload = await request(`/api/bookmarks?${params}`);
-    state.bookmarks = payload.bookmarks || [];
+    if (version !== bookmarkLoadVersion) return;
+    state.hasMore = payload.bookmarks.length === 100;
+    state.bookmarks = append ? [...state.bookmarks, ...payload.bookmarks] : payload.bookmarks;
     state.selected.clear();
     renderBookmarks();
   } catch (error) {
@@ -247,19 +254,97 @@ function renderBookmarks() {
   const list = $("#bookmarkList");
   const empty = $("#emptyState");
   list.replaceChildren();
+  const home = state.scope === "home";
+  $("#homeGrid").replaceChildren();
+  $("#homeGrid").hidden = !home;
+  $("#libraryFilters").hidden = home;
+  $("#selectionModeButton").hidden = home;
+  $("#manageHomeButton").hidden = !home;
+  $("#manageHomeButton").textContent = state.managingHome ? "完成" : "整理";
+  $("#manageHomeButton").setAttribute("aria-label", state.managingHome ? "完成整理" : "整理首页");
+  $("#manageHomeButton").setAttribute("aria-pressed", String(state.managingHome));
+  $("#searchInput").placeholder = home ? "搜索网站名称、分组…" : "搜索标题、标签、笔记…";
+  $("#searchInput").setAttribute("aria-label", home ? "搜索书签首页" : "搜索资料");
+  document.querySelectorAll("[data-scope]").forEach(link => {
+    link.search = state.query ? new URLSearchParams({ q: state.query }).toString() : "";
+    if (link.dataset.scope === state.scope) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  $("#listTitle").textContent = home ? "网站分组" : "已保存的链接";
+  $("#loadMoreButton").hidden = !state.hasMore;
   renderBulkBar();
   $("#resultSummary").textContent = state.bookmarks.length ? `${state.bookmarks.length} 条结果` : "";
+  $("#resultSummary").hidden = home && !state.query;
   if (!state.bookmarks.length) {
     empty.hidden = false;
     list.hidden = true;
-    $("#emptyTitle").textContent = state.query ? "没有找到相关书签" : "保存第一个链接";
-    $("#emptyDescription").textContent = state.query ? "换一个记得住的词试试。" : "从一个值得日后重看的网页开始。";
+    $("#emptyTitle").textContent = state.query ? "没有找到相关内容" : home ? "添加你的常用网站" : "保存第一份资料";
+    $("#emptyDescription").textContent = state.query ? "换一个词，或切换到全部内容搜索。" : home ? "添加日常使用的网站，也可以从资料库将链接添加到首页。" : "保存文章、教程或参考链接，以后按标签和关键词找回。";
     $("#emptyAddButton").hidden = Boolean(state.query);
     return;
   }
   empty.hidden = true;
-  list.hidden = false;
+  list.hidden = home;
+  if (home) { renderHome(); return; }
   for (const bookmark of state.bookmarks) list.append(bookmarkRow(bookmark));
+}
+
+function renderHome() {
+  const groups = new Map();
+  for (const bookmark of state.bookmarks) {
+    const key = bookmark.homePinned ? "pinned" : `group:${bookmark.homeGroup || ""}`;
+    if (!groups.has(key)) groups.set(key, { title: bookmark.homePinned ? "置顶" : bookmark.homeGroup || "未分组", items: [] });
+    groups.get(key).items.push(bookmark);
+  }
+  for (const group of groups.values()) {
+    const section = element("section", "home-group");
+    section.append(element("h2", "", group.title));
+    const grid = element("div", "shortcut-grid");
+    for (const bookmark of group.items) {
+      const card = element("article", "shortcut-card");
+      const link = element("a", "shortcut-link");
+      link.href = bookmark.url;
+      const name = bookmark.homeTitle || bookmark.title || safeDomain(bookmark.url);
+      const icon = element("span", "shortcut-icon", [...name][0]?.toUpperCase() || "↗");
+      icon.setAttribute("aria-hidden", "true");
+      const text = element("span", "shortcut-text");
+      text.append(element("strong", "", name), element("small", "", safeDomain(bookmark.url)));
+      link.append(icon, text);
+      card.append(link);
+      if (state.managingHome) {
+        const actions = element("div", "shortcut-actions");
+        const edit = element("button", "text-button", "编辑");
+        edit.addEventListener("click", () => openEditDialog(bookmark));
+        const pin = element("button", "text-button", bookmark.homePinned ? "取消置顶" : "置顶");
+        pin.addEventListener("click", () => updateBookmark(bookmark.id, { homePinned: !bookmark.homePinned }));
+        const remove = element("button", "text-button", "移出首页");
+        remove.addEventListener("click", () => removeFromHome(bookmark));
+        actions.append(edit, pin, remove);
+        card.append(actions);
+      }
+      grid.append(card);
+    }
+    section.append(grid);
+    $("#homeGrid").append(section);
+  }
+}
+
+async function removeFromHome(bookmark) {
+  if (bookmark.library) return updateBookmark(bookmark.id, { home: false });
+  if (!confirm(`将“${bookmark.homeTitle || bookmark.title || bookmark.url}”移出首页并保留到资料库？`)) return;
+  await updateBookmark(bookmark.id, { home: false, library: true });
+}
+
+function populateHomeFields(bookmark = {}) {
+  $("#homeInput").checked = Boolean(bookmark.home);
+  $("#libraryInput").checked = bookmark.library !== false;
+  $("#homeTitleInput").value = bookmark.homeTitle || "";
+  $("#homeGroupInput").value = bookmark.homeGroup || "";
+  $("#homeOrderInput").value = bookmark.homeOrder || 0;
+  $("#homePinnedInput").checked = Boolean(bookmark.homePinned);
+  $("#homeFields").hidden = !bookmark.home;
+  $("#libraryFields").hidden = bookmark.library === false;
+  $("#homeGroupSuggestions").replaceChildren(...[...new Set(state.bookmarks.map(b => b.homeGroup).filter(Boolean))].map(group => new Option(group, group)));
 }
 
 function bookmarkRow(bookmark) {
@@ -292,9 +377,13 @@ function bookmarkRow(bookmark) {
   const date = element("time", "", formatDate(bookmark.createdAt));
   date.dateTime = bookmark.createdAt;
   meta.append(domain, element("span", "", "·"), date);
-  if (bookmark.public) meta.append(element("span", "badge", "公开"));
+  if (bookmark.public) meta.append(recommendationMarker(bookmark));
   if (bookmark.unread) meta.append(element("span", "badge", "稍后阅读"));
-  for (const tag of bookmark.tags || []) meta.append(element("span", "badge", `#${tag}`));
+  for (const tag of bookmark.tags || []) {
+    const tagButton = element("button", "text-button badge", `#${tag}`);
+    tagButton.addEventListener("click", () => { state.query = tag; $("#searchInput").value = tag; loadBookmarks(); });
+    meta.append(tagButton);
+  }
   if (bookmark.archiveStatus === "complete") {
     const archiveLink = element("a", "archive-link", "存档");
     archiveLink.href = `/archive/${bookmark.id}`;
@@ -308,8 +397,15 @@ function bookmarkRow(bookmark) {
     body.append(marker);
   }
   body.append(title, meta);
-  if (bookmark.publicComment) body.append(element("p", "bookmark-note", `短评：${bookmark.publicComment}`));
-  if (bookmark.note) body.append(element("p", "bookmark-note", bookmark.note));
+  if (bookmark.note) {
+    body.append(element("p", "bookmark-note bookmark-private-note", bookmark.note));
+  }
+  if (bookmark.description) {
+    const description = element("details", "page-description bookmark-description");
+    const summary = element("summary", "", "原网页简介");
+    description.append(summary, element("p", "", bookmark.description));
+    body.append(description);
+  }
 
   const actions = element("div", "row-actions");
   actions.setAttribute("role", "group");
@@ -324,7 +420,14 @@ function bookmarkRow(bookmark) {
   remove.classList.add("danger");
   remove.type = "button";
   remove.addEventListener("click", () => deleteBookmark(bookmark));
-  actions.append(star, unread, edit);
+  const home = element("button", "bookmark-action", bookmark.home ? "移出首页" : "添加到首页");
+  home.addEventListener("click", () => bookmark.home ? removeFromHome(bookmark) : updateBookmark(bookmark.id, { home: true }));
+  actions.append(star, unread, edit, home);
+  if (!bookmark.library) {
+    const library = element("button", "bookmark-action", "加入资料库");
+    library.addEventListener("click", () => updateBookmark(bookmark.id, { library: true }));
+    actions.append(library);
+  }
   if (bookmark.archiveStatus === "failed" || bookmark.archiveStatus === "idle") {
     const retry = bookmarkAction(bookmark.archiveStatus === "idle" ? "归档正文" : "重试归档", "archive");
     retry.type = "button";
@@ -390,7 +493,7 @@ async function applyBulkUpdate(patch, successMessage) {
 
 async function bulkDelete() {
   const ids = selectedIDs();
-  if (!ids.length || !confirm(`确定删除选中的 ${ids.length} 条书签？此操作无法撤销。`)) return;
+  if (!ids.length || !confirm(`彻底删除选中的 ${ids.length} 条链接？首页入口和资料库记录会一并删除，此操作无法撤销。`)) return;
   try {
     const result = await request("/api/bookmarks/bulk", {
       method: "DELETE",
@@ -401,6 +504,47 @@ async function bulkDelete() {
   } catch (error) {
     showToast(error.message);
   }
+}
+
+function recommendationMarker(bookmark) {
+  const marker = element("span", "recommendation-marker");
+  const button = element("button", "text-button recommendation-toggle", "公开推荐");
+  button.type = "button";
+  const preview = element("span", "recommendation-preview", bookmark.publicComment || "暂未填写推荐理由");
+  preview.id = `recommendation-${bookmark.id}`;
+  preview.hidden = true;
+  button.setAttribute("aria-controls", preview.id);
+  button.setAttribute("aria-expanded", "false");
+  let pinned = false;
+  const show = (visible) => {
+    preview.hidden = !visible;
+    button.setAttribute("aria-expanded", String(visible));
+  };
+  marker.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "mouse") show(true);
+  });
+  marker.addEventListener("pointerleave", () => {
+    if (!pinned) show(false);
+  });
+  button.addEventListener("click", () => {
+    pinned = !pinned;
+    show(pinned);
+  });
+  marker.addEventListener("focusout", (event) => {
+    if (!marker.contains(event.relatedTarget)) {
+      pinned = false;
+      show(false);
+    }
+  });
+  marker.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !preview.hidden) {
+      event.stopPropagation();
+      pinned = false;
+      show(false);
+    }
+  });
+  marker.append(button, preview);
+  return marker;
 }
 
 function element(tag, className = "", text = "") {
@@ -421,8 +565,10 @@ function formatDate(value) {
 function openCreateDialog() {
   $("#bookmarkForm").reset();
   $("#bookmarkId").value = "";
+  populateHomeFields({ home: state.scope === "home", library: state.scope !== "home" });
   $("#publicCommentField").hidden = true;
   $("#pageDescription").hidden = true;
+  $("#pageDescription").open = false;
   $("#dialogTitle").textContent = "保存链接";
   $("#urlField").hidden = false;
   $("#urlInput").disabled = false;
@@ -435,6 +581,7 @@ function openCreateDialog() {
 function openEditDialog(bookmark) {
   $("#bookmarkForm").reset();
   $("#bookmarkId").value = bookmark.id;
+  populateHomeFields(bookmark);
   $("#dialogTitle").textContent = "编辑书签";
   $("#archiveChoice").hidden = true;
   $("#urlField").hidden = true;
@@ -458,7 +605,16 @@ function openEditDialog(bookmark) {
 async function submitBookmark(event) {
   event.preventDefault();
   const id = $("#bookmarkId").value;
+  if (!$("#homeInput").checked && !$("#libraryInput").checked) {
+    $("#dialogError").textContent = "请至少选择一个保存位置。"; return;
+  }
   const payload = {
+    home: $("#homeInput").checked,
+    library: $("#libraryInput").checked,
+    homeTitle: $("#homeTitleInput").value,
+    homeGroup: $("#homeGroupInput").value,
+    homeOrder: Number($("#homeOrderInput").value),
+    homePinned: $("#homePinnedInput").checked,
     title: $("#titleInput").value,
     note: $("#noteInput").value,
     public: $("#publicInput").checked,
@@ -512,7 +668,7 @@ async function updateBookmark(id, patch) {
 }
 
 async function deleteBookmark(bookmark) {
-  if (!confirm(`删除“${bookmark.title || bookmark.url}”？`)) return;
+  if (!confirm(`彻底删除“${bookmark.title || bookmark.url}”？这会同时移除首页入口和资料库记录。`)) return;
   try {
     await request(`/api/bookmarks/${bookmark.id}`, { method: "DELETE" });
     showToast("书签已删除");
@@ -539,6 +695,7 @@ function showCaptureForm() {
     captureView.append(bookmarkDialog);
     bookmarkDialog.classList.add("capture-form");
     $("#bookmarkForm").reset();
+    populateHomeFields({ home: false, library: true });
     $("#urlInput").value = captureParams.get("url") || "";
     $("#titleInput").value = captureParams.get("title") || "";
     $("#noteInput").value = captureParams.get("note") || "";
@@ -676,6 +833,7 @@ function importFormData(includeArchive) {
   const form = new FormData();
   form.append("file", state.importFile);
   if (Object.keys(state.importMapping).length) form.append("mapping", JSON.stringify(state.importMapping));
+  form.append("destination", $("#importDestination").value);
   if (includeArchive) form.append("archive", String($("#importArchive").checked));
   return form;
 }
@@ -688,8 +846,9 @@ function renderCSVMapping(result) {
   }
   container.hidden = false;
   const fields = [
-    ["url", "网址（必选）"], ["title", "标题"], ["note", "私人备注"], ["description", "网页描述"], ["publicComment", "公开短评"], ["tags", "标签"],
+    ["url", "网址（必选）"], ["title", "标题"], ["note", "我的笔记（仅自己可见）"], ["description", "原网页简介（来自原网站）"], ["publicComment", "推荐理由（公开推荐时可见）"], ["tags", "标签"],
     ["unread", "稍后阅读"], ["starred", "星标"], ["createdAt", "创建时间"],
+    ["home", "书签首页"], ["library", "资料库"], ["homeTitle", "首页简称"], ["homeGroup", "首页分组"], ["homeOrder", "首页排序"], ["homePinned", "首页置顶"],
   ];
   const mappingFields = $("#mappingFields");
   mappingFields.replaceChildren();
@@ -814,6 +973,7 @@ document.querySelectorAll("[data-bulk-tags]").forEach((button) => {
 });
 $("#logoutButton").addEventListener("click", async () => {
   await request("/api/auth/logout", { method: "POST" });
+  settingsDialog.close();
   const status = await request("/api/status");
   showAuth(status);
 });
@@ -826,9 +986,9 @@ $("#searchInput").addEventListener("input", (event) => {
   }, 180);
 });
 
-document.querySelectorAll(".nav-item").forEach((button) => {
+document.querySelectorAll("[data-state]").forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((item) => {
+    document.querySelectorAll("[data-state]").forEach((item) => {
       item.classList.remove("active");
       item.setAttribute("aria-pressed", "false");
     });
@@ -849,5 +1009,13 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && importDialog.open) importDialog.close();
 });
 
+$("#libraryInput").addEventListener("change", () => { $("#libraryFields").hidden = !$("#libraryInput").checked; });
+$("#homeInput").addEventListener("change", () => { $("#homeFields").hidden = !$("#homeInput").checked; });
+$("#manageHomeButton").addEventListener("click", () => { state.managingHome = !state.managingHome; renderBookmarks(); });
+$("#loadMoreButton").addEventListener("click", () => loadBookmarks(true));
+$("#searchInput").value = state.query;
+$("#homeURL").textContent = `${location.origin}/`;
+$("#importDestination").addEventListener("change", previewImport);
+document.querySelectorAll("[data-bulk-place]").forEach(button => button.addEventListener("click", () => applyBulkUpdate({ [button.dataset.bulkPlace]: true }, "保存位置已更新")));
 configureBookmarklet();
 init();

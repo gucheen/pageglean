@@ -24,6 +24,13 @@ const (
 )
 
 type Item struct {
+	Home       bool   `json:"home"`
+	Library    bool   `json:"library"`
+	HomeTitle  string `json:"homeTitle"`
+	HomeGroup  string `json:"homeGroup"`
+	HomeOrder  int    `json:"homeOrder"`
+	HomePinned bool   `json:"homePinned"`
+
 	Description   string    `json:"description"`
 	PublicComment string    `json:"publicComment"`
 	URL           string    `json:"url"`
@@ -36,6 +43,13 @@ type Item struct {
 }
 
 type Mapping struct {
+	Home       string `json:"home"`
+	Library    string `json:"library"`
+	HomeTitle  string `json:"homeTitle"`
+	HomeGroup  string `json:"homeGroup"`
+	HomeOrder  string `json:"homeOrder"`
+	HomePinned string `json:"homePinned"`
+
 	Description   string `json:"description"`
 	PublicComment string `json:"publicComment"`
 	URL           string `json:"url"`
@@ -192,6 +206,12 @@ func parseCSV(data []byte, mapping Mapping) (Result, error) {
 	skipped := 0
 	for _, record := range records[1:] {
 		item := Item{
+			Home:       parseBool(csvValue(record, indexes, mapping.Home)),
+			Library:    parseBool(csvValue(record, indexes, mapping.Library)),
+			HomeTitle:  csvValue(record, indexes, mapping.HomeTitle),
+			HomeGroup:  csvValue(record, indexes, mapping.HomeGroup),
+			HomePinned: parseBool(csvValue(record, indexes, mapping.HomePinned)),
+
 			Description:   csvValue(record, indexes, mapping.Description),
 			PublicComment: csvValue(record, indexes, mapping.PublicComment),
 			URL:           csvValue(record, indexes, mapping.URL),
@@ -201,6 +221,7 @@ func parseCSV(data []byte, mapping Mapping) (Result, error) {
 			Unread:        parseBool(csvValue(record, indexes, mapping.Unread)),
 			Starred:       parseBool(csvValue(record, indexes, mapping.Starred)),
 		}
+		item.HomeOrder, _ = strconv.Atoi(csvValue(record, indexes, mapping.HomeOrder))
 		if rawTime := csvValue(record, indexes, mapping.CreatedAt); rawTime != "" {
 			item.CreatedAt = parseTime(rawTime)
 		}
@@ -240,6 +261,13 @@ func finish(format string, headers []string, mapping Mapping, items []Item) (Res
 
 func inferMapping(headers []string) Mapping {
 	aliases := map[string][]string{
+		"home":       {"home"},
+		"library":    {"library"},
+		"homeTitle":  {"homeTitle"},
+		"homeGroup":  {"homeGroup"},
+		"homeOrder":  {"homeOrder"},
+		"homePinned": {"homePinned"},
+
 		"description":   {"description", "网页描述", "描述"},
 		"publicComment": {"publicComment", "public_comment", "公开短评"},
 		"url":           {"url", "href", "link", "网址", "链接"},
@@ -262,6 +290,13 @@ func inferMapping(headers []string) Mapping {
 		return ""
 	}
 	return Mapping{
+		Home:       find("home"),
+		Library:    find("library"),
+		HomeTitle:  find("homeTitle"),
+		HomeGroup:  find("homeGroup"),
+		HomeOrder:  find("homeOrder"),
+		HomePinned: find("homePinned"),
+
 		Description: find("description"), PublicComment: find("publicComment"), URL: find("url"), Title: find("title"), Note: find("note"), Tags: find("tags"),
 		Unread: find("unread"), Starred: find("starred"), CreatedAt: find("created_at"),
 	}

@@ -38,12 +38,12 @@ func TestPublicPagePrivacyPaginationAndWithdrawal(t *testing.T) {
 	if w.Code != 200 || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("response: %d %v", w.Code, w.Header())
 	}
-	for _, unwanted := range []string{"PRIVATE", "Bookmark-00", "<script>", "/archive/"} {
+	for _, unwanted := range []string{"PRIVATE", "Bookmark-00", "<script>", "/archive/", "网页描述"} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("unexpected %s", unwanted)
 		}
 	}
-	if strings.Count(body, "<article") != 30 || !strings.Contains(body, "/public/?page=2") || !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, "网页描述") {
+	if strings.Count(body, "<article") != 30 || !strings.Contains(body, "/public/?page=2") || !strings.Contains(body, "&lt;script&gt;") || !strings.Contains(body, "公开短评") {
 		t.Fatal("missing page content")
 	}
 	if strings.Index(body, "Bookmark-30") > strings.Index(body, "Bookmark-29") {

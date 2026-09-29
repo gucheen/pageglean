@@ -22,8 +22,7 @@
         <article class="bookmark-row">
           <h2><a class="bookmark-title" href="{{.URL}}" target="_blank" rel="noopener noreferrer">{{.Title}}</a></h2>
           <div class="bookmark-meta"><span class="bookmark-domain">{{domain .URL}}</span><span>·</span><time datetime="{{.SavedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.SavedAt.Format "2006-01-02"}}</time></div>
-          {{if .Description}}<p class="public-description">{{.Description}}</p>{{end}}
-          {{if .PublicComment}}<p class="public-comment"><span class="public-comment-label">短评</span>{{.PublicComment}}</p>{{end}}
+          {{if .PublicComment}}<p class="public-comment"><span class="content-label">推荐理由</span>{{.PublicComment}}</p>{{end}}
         </article>
         {{else}}
         <div class="empty-state"><h2>还没有公开书签</h2><p>有值得分享的链接时，会出现在这里。</p></div>

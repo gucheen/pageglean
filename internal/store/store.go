@@ -47,6 +47,13 @@ func (u *User) WebAuthnDisplayName() string                { return u.DisplayNam
 func (u *User) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 
 type Bookmark struct {
+	Home       bool   `json:"home"`
+	Library    bool   `json:"library"`
+	HomeTitle  string `json:"homeTitle"`
+	HomeGroup  string `json:"homeGroup"`
+	HomeOrder  int    `json:"homeOrder"`
+	HomePinned bool   `json:"homePinned"`
+
 	Public        bool       `json:"public"`
 	PublicComment string     `json:"publicComment"`
 	ID            int64      `json:"id"`
@@ -73,6 +80,7 @@ type Bookmark struct {
 }
 
 type BookmarkFilter struct {
+	Scope  string
 	Query  string
 	State  string
 	Limit  int
@@ -80,6 +88,8 @@ type BookmarkFilter struct {
 }
 
 type BulkBookmarkPatch struct {
+	Home       *bool
+	Library    *bool
 	AddTags    []string
 	RemoveTags []string
 	Unread     *bool
@@ -265,6 +275,13 @@ func (s *Store) ensureBookmarkColumns(ctx context.Context) error {
 		return err
 	}
 	columns := []struct{ name, definition string }{
+		{"on_home", `INTEGER NOT NULL DEFAULT 0 CHECK (on_home IN (0, 1))`},
+		{"in_library", `INTEGER NOT NULL DEFAULT 1 CHECK (in_library IN (0, 1))`},
+		{"home_title", `TEXT NOT NULL DEFAULT ''`},
+		{"home_group", `TEXT NOT NULL DEFAULT ''`},
+		{"home_order", `INTEGER NOT NULL DEFAULT 0`},
+		{"home_pinned", `INTEGER NOT NULL DEFAULT 0 CHECK (home_pinned IN (0, 1))`},
+
 		{"description", `TEXT NOT NULL DEFAULT ''`},
 		{"is_public", `INTEGER NOT NULL DEFAULT 0 CHECK (is_public IN (0, 1))`},
 		{"public_comment", `TEXT NOT NULL DEFAULT ''`},
@@ -762,7 +779,7 @@ func (s *Store) reindexBookmarkTx(ctx context.Context, tx *sql.Tx, bookmarkID in
 	}
 	var title, note, rawURL, body string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT title, note || ' ' || public_comment || ' ' || description, url, content_text FROM bookmarks WHERE id = ?
+		SELECT title || ' ' || home_title || ' ' || home_group, note || ' ' || public_comment || ' ' || description, url, content_text FROM bookmarks WHERE id = ?
 	`, bookmarkID).Scan(&title, &note, &rawURL, &body); err != nil {
 		return err
 	}
@@ -847,6 +864,10 @@ func (s *Store) BackupDatabase(ctx context.Context, destination string) error {
 }
 
 func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark, bool, error) {
+	if !bookmark.Home && !bookmark.Library {
+		bookmark.Library = true
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Bookmark{}, false, err
@@ -858,12 +879,17 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	if err == nil {
 		_, err = tx.ExecContext(ctx, `
 			UPDATE bookmarks
-			SET last_seen_at = ?,
+			SET on_home = MAX(on_home, ?), in_library = MAX(in_library, ?),
+			    home_title = CASE WHEN on_home = 0 AND ? THEN ? ELSE home_title END,
+			    home_group = CASE WHEN on_home = 0 AND ? THEN ? ELSE home_group END,
+			    home_order = CASE WHEN on_home = 0 AND ? THEN ? ELSE home_order END,
+			    home_pinned = CASE WHEN on_home = 0 AND ? THEN ? ELSE home_pinned END,
+			    last_seen_at = ?,
 			    title = CASE WHEN title = '' THEN ? ELSE title END,
 			    note = CASE WHEN note = '' THEN ? ELSE note END,
-			    updated_at = CASE WHEN (title = '' AND ? != '') OR (note = '' AND ? != '') THEN ? ELSE updated_at END
+			    updated_at = CASE WHEN (title = '' AND ? != '') OR (note = '' AND ? != '') OR (on_home = 0 AND ?) OR (in_library = 0 AND ?) THEN ? ELSE updated_at END
 			WHERE id = ?
-		`, formatTime(s.now()), bookmark.Title, bookmark.Note, bookmark.Title, bookmark.Note, formatTime(s.now()), existingID)
+		`, bookmark.Home, bookmark.Library, bookmark.Home, bookmark.HomeTitle, bookmark.Home, bookmark.HomeGroup, bookmark.Home, bookmark.HomeOrder, bookmark.Home, bookmark.HomePinned, formatTime(s.now()), bookmark.Title, bookmark.Note, bookmark.Title, bookmark.Note, bookmark.Home, bookmark.Library, formatTime(s.now()), existingID)
 		if err != nil {
 			return Bookmark{}, false, err
 		}
@@ -911,11 +937,11 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO bookmarks
 		    (url, canonical_url, title, description, author, note, unread, starred, capture_source,
-		     archive_status, created_at, updated_at, last_seen_at, is_public, public_comment)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		     archive_status, created_at, updated_at, last_seen_at, is_public, public_comment, on_home, in_library, home_title, home_group, home_order, home_pinned)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, bookmark.URL, bookmark.CanonicalURL, bookmark.Title, bookmark.Description, bookmark.Author,
 		bookmark.Note, bookmark.Unread, bookmark.Starred, bookmark.CaptureSource, archiveStatus,
-		formatTime(createdAt), formatTime(now), formatTime(now), bookmark.Public, bookmark.PublicComment)
+		formatTime(createdAt), formatTime(now), formatTime(now), bookmark.Public, bookmark.PublicComment, bookmark.Home, bookmark.Library, bookmark.HomeTitle, bookmark.HomeGroup, bookmark.HomeOrder, bookmark.HomePinned)
 	if err != nil {
 		return Bookmark{}, false, fmt.Errorf("insert bookmark: %w", err)
 	}
@@ -949,7 +975,7 @@ func (s *Store) GetBookmark(ctx context.Context, id int64) (Bookmark, error) {
 	bookmark, err := scanBookmark(s.db.QueryRowContext(ctx, `
 		SELECT id, url, canonical_url, title, description, author, note, unread, starred,
 		       capture_source, archive_status, archive_error, content_path, content_hash, archived_at,
-		       created_at, updated_at, last_seen_at, is_public, public_comment
+		       created_at, updated_at, last_seen_at, is_public, public_comment, on_home, in_library, home_title, home_group, home_order, home_pinned
 		FROM bookmarks WHERE id = ?
 	`, id))
 	if err != nil {
@@ -969,12 +995,18 @@ func (s *Store) ListBookmarks(ctx context.Context, filter BookmarkFilter) ([]Boo
 	}
 	var where []string
 	var args []any
+	switch filter.Scope {
+	case "home":
+		where = append(where, "b.on_home = 1")
+	case "library":
+		where = append(where, "b.in_library = 1")
+	}
 	searchQuery := strings.TrimSpace(filter.Query)
 	useFTS := searchQuery != "" && s.ftsEnabled && searchindex.Query(searchQuery) != ""
 	if searchQuery != "" && !useFTS {
-		where = append(where, `(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.note LIKE ? ESCAPE '\' OR b.content_text LIKE ? ESCAPE '\' OR b.public_comment LIKE ? ESCAPE '\' OR b.description LIKE ? ESCAPE '\')`)
+		where = append(where, `(b.title LIKE ? ESCAPE '\' OR b.url LIKE ? ESCAPE '\' OR b.note LIKE ? ESCAPE '\' OR b.content_text LIKE ? ESCAPE '\' OR b.public_comment LIKE ? ESCAPE '\' OR b.description LIKE ? ESCAPE '\' OR b.home_title LIKE ? ESCAPE '\' OR b.home_group LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE bt.bookmark_id = b.id AND t.name LIKE ? ESCAPE '\'))`)
 		pattern := "%" + escapeLike(searchQuery) + "%"
-		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 	switch filter.State {
 	case "unread":
@@ -987,7 +1019,7 @@ func (s *Store) ListBookmarks(ctx context.Context, filter BookmarkFilter) ([]Boo
 	query := `
 		SELECT b.id, b.url, b.canonical_url, b.title, b.description, b.author, b.note, b.unread, b.starred,
 		       capture_source, archive_status, archive_error, content_path, content_hash, archived_at,
-		       created_at, updated_at, last_seen_at, is_public, public_comment
+		       created_at, updated_at, last_seen_at, is_public, public_comment, on_home, in_library, home_title, home_group, home_order, home_pinned
 		FROM bookmarks b`
 	if useFTS {
 		query += ` JOIN bookmark_fts ON bookmark_fts.bookmark_id = b.id`
@@ -997,7 +1029,9 @@ func (s *Store) ListBookmarks(ctx context.Context, filter BookmarkFilter) ([]Boo
 	if len(where) > 0 {
 		query += ` WHERE ` + strings.Join(where, ` AND `)
 	}
-	if useFTS {
+	if filter.Scope == "home" {
+		query += ` ORDER BY b.home_pinned DESC, b.home_group COLLATE NOCASE, b.home_order, b.id LIMIT ? OFFSET ?`
+	} else if useFTS {
 		query += ` ORDER BY bm25(bookmark_fts, 0.0, 8.0, 6.0, 5.0, 3.0, 1.0), b.created_at DESC LIMIT ? OFFSET ?`
 	} else {
 		query += ` ORDER BY b.created_at DESC, b.id DESC LIMIT ? OFFSET ?`
@@ -1036,6 +1070,10 @@ func (s *Store) ListBookmarks(ctx context.Context, filter BookmarkFilter) ([]Boo
 }
 
 func (s *Store) UpdateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark, error) {
+	if !bookmark.Home && !bookmark.Library {
+		return Bookmark{}, fmt.Errorf("链接至少需要保留在首页或资料库中")
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Bookmark{}, err
@@ -1043,9 +1081,9 @@ func (s *Store) UpdateBookmark(ctx context.Context, bookmark Bookmark) (Bookmark
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
 		UPDATE bookmarks
-		SET title = ?, note = ?, unread = ?, starred = ?, updated_at = ?, is_public = ?, public_comment = ?
+		SET title = ?, note = ?, unread = ?, starred = ?, updated_at = ?, is_public = ?, public_comment = ?, on_home = ?, in_library = ?, home_title = ?, home_group = ?, home_order = ?, home_pinned = ?
 		WHERE id = ?
-	`, bookmark.Title, bookmark.Note, bookmark.Unread, bookmark.Starred, formatTime(s.now()), bookmark.Public, bookmark.PublicComment, bookmark.ID)
+	`, bookmark.Title, bookmark.Note, bookmark.Unread, bookmark.Starred, formatTime(s.now()), bookmark.Public, bookmark.PublicComment, bookmark.Home, bookmark.Library, bookmark.HomeTitle, bookmark.HomeGroup, bookmark.HomeOrder, bookmark.HomePinned, bookmark.ID)
 	if err != nil {
 		return Bookmark{}, fmt.Errorf("update bookmark: %w", err)
 	}
@@ -1074,23 +1112,33 @@ func (s *Store) BulkUpdateBookmarks(ctx context.Context, ids []int64, patch Bulk
 		return 0, err
 	}
 	defer tx.Rollback()
+	home := optionalBool(patch.Home)
+	library := optionalBool(patch.Library)
 	unread := optionalBool(patch.Unread)
 	starred := optionalBool(patch.Starred)
 	updated := 0
 	for _, id := range ids {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE bookmarks SET
+				on_home = COALESCE(?, on_home), in_library = COALESCE(?, in_library),
 				unread = CASE WHEN ? IS NULL THEN unread ELSE ? END,
 				starred = CASE WHEN ? IS NULL THEN starred ELSE ? END,
 				updated_at = ?
 			WHERE id = ?
-		`, unread, unread, starred, starred, formatTime(s.now()), id)
+		`, home, library, unread, unread, starred, starred, formatTime(s.now()), id)
 		if err != nil {
 			return 0, err
 		}
 		affected, _ := result.RowsAffected()
 		if affected == 0 {
 			continue
+		}
+		var retained bool
+		if err := tx.QueryRowContext(ctx, "SELECT on_home OR in_library FROM bookmarks WHERE id = ?", id).Scan(&retained); err != nil {
+			return 0, err
+		}
+		if !retained {
+			return 0, fmt.Errorf("链接至少需要保留在首页或资料库中")
 		}
 		updated++
 		if len(patch.AddTags) > 0 || len(patch.RemoveTags) > 0 {
@@ -1230,7 +1278,7 @@ func scanBookmark(row scanner) (Bookmark, error) {
 		&bookmark.ID, &bookmark.URL, &bookmark.CanonicalURL, &bookmark.Title, &bookmark.Description,
 		&bookmark.Author, &bookmark.Note, &unread, &starred, &bookmark.CaptureSource,
 		&bookmark.ArchiveStatus, &bookmark.ArchiveError, &bookmark.ContentPath, &bookmark.ContentHash,
-		&archivedAt, &createdAt, &updatedAt, &lastSeenAt, &bookmark.Public, &bookmark.PublicComment,
+		&archivedAt, &createdAt, &updatedAt, &lastSeenAt, &bookmark.Public, &bookmark.PublicComment, &bookmark.Home, &bookmark.Library, &bookmark.HomeTitle, &bookmark.HomeGroup, &bookmark.HomeOrder, &bookmark.HomePinned,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Bookmark{}, ErrNotFound
