@@ -226,6 +226,48 @@ function showApp() {
   if (state.capture) showCaptureForm();
 }
 
+function syncScopeLinks() {
+  document.querySelectorAll("[data-scope]").forEach(link => {
+    link.search = state.query ? new URLSearchParams({ q: state.query }).toString() : "";
+    if (link.dataset.scope === state.scope) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+}
+
+function setSearchQuery(value, delay = 0) {
+  clearTimeout(searchTimer);
+  state.query = value.trim();
+  // Invalidate pending results immediately, before the debounced request starts.
+  bookmarkLoadVersion++;
+  const url = new URL(location.href);
+  if (state.query) url.searchParams.set("q", state.query);
+  else url.searchParams.delete("q");
+  history.replaceState(history.state, "", url);
+  syncScopeLinks();
+  if (delay) searchTimer = setTimeout(() => loadBookmarks(), delay);
+  else loadBookmarks();
+}
+
+function restoreWorkspace() {
+  clearTimeout(searchTimer);
+  state.scope = location.pathname === "/library" ? "library" : location.pathname === "/all" ? "all" : "home";
+  state.query = new URLSearchParams(location.search).get("q") || "";
+  $("#searchInput").value = state.query;
+  state.filter = "";
+  state.managingHome = false;
+  state.selecting = false;
+  state.selected.clear();
+  state.bookmarks = [];
+  state.hasMore = false;
+  document.querySelectorAll("[data-state]").forEach(button => {
+    const active = button.dataset.state === "";
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  renderBookmarks();
+  loadBookmarks();
+}
+
 async function loadBookmarks(append = false) {
   if (state.capture) return;
   const version = ++bookmarkLoadVersion;
@@ -241,6 +283,7 @@ async function loadBookmarks(append = false) {
     state.selected.clear();
     renderBookmarks();
   } catch (error) {
+    if (version !== bookmarkLoadVersion) return;
     if (error.message.includes("Passkey")) {
       const status = await request("/api/status");
       showAuth(status);
@@ -265,11 +308,7 @@ function renderBookmarks() {
   $("#manageHomeButton").setAttribute("aria-pressed", String(state.managingHome));
   $("#searchInput").placeholder = home ? "搜索网站名称、分组…" : "搜索标题、标签、笔记…";
   $("#searchInput").setAttribute("aria-label", home ? "搜索书签首页" : "搜索资料");
-  document.querySelectorAll("[data-scope]").forEach(link => {
-    link.search = state.query ? new URLSearchParams({ q: state.query }).toString() : "";
-    if (link.dataset.scope === state.scope) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
-  });
+  syncScopeLinks();
   $("#listTitle").textContent = home ? "网站分组" : "已保存的链接";
   $("#loadMoreButton").hidden = !state.hasMore;
   renderBulkBar();
@@ -381,7 +420,7 @@ function bookmarkRow(bookmark) {
   if (bookmark.unread) meta.append(element("span", "badge", "稍后阅读"));
   for (const tag of bookmark.tags || []) {
     const tagButton = element("button", "text-button badge", `#${tag}`);
-    tagButton.addEventListener("click", () => { state.query = tag; $("#searchInput").value = tag; loadBookmarks(); });
+    tagButton.addEventListener("click", () => { $("#searchInput").value = tag; setSearchQuery(tag); });
     meta.append(tagButton);
   }
   if (bookmark.archiveStatus === "complete") {
@@ -979,11 +1018,21 @@ $("#logoutButton").addEventListener("click", async () => {
 });
 
 $("#searchInput").addEventListener("input", (event) => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    state.query = event.target.value.trim();
-    loadBookmarks();
-  }, 180);
+  setSearchQuery(event.target.value, event.target.value.trim() ? 180 : 0);
+});
+
+document.querySelectorAll("[data-scope]").forEach(link => {
+  link.addEventListener("click", event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (link.dataset.scope === state.scope) return;
+    history.pushState(null, "", link.href);
+    restoreWorkspace();
+  });
+});
+
+window.addEventListener("popstate", () => {
+  if (!state.capture && ["/", "/library", "/all"].includes(location.pathname)) restoreWorkspace();
 });
 
 document.querySelectorAll("[data-state]").forEach((button) => {
@@ -1014,6 +1063,7 @@ $("#homeInput").addEventListener("change", () => { $("#homeFields").hidden = !$(
 $("#manageHomeButton").addEventListener("click", () => { state.managingHome = !state.managingHome; renderBookmarks(); });
 $("#loadMoreButton").addEventListener("click", () => loadBookmarks(true));
 $("#searchInput").value = state.query;
+syncScopeLinks();
 $("#homeURL").textContent = `${location.origin}/`;
 $("#importDestination").addEventListener("change", previewImport);
 document.querySelectorAll("[data-bulk-place]").forEach(button => button.addEventListener("click", () => applyBulkUpdate({ [button.dataset.bulkPlace]: true }, "保存位置已更新")));
