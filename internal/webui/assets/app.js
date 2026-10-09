@@ -343,6 +343,8 @@ function renderHome() {
       const card = element("article", "shortcut-card");
       const link = element("a", "shortcut-link");
       link.href = bookmark.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
       const name = bookmark.homeTitle || bookmark.title || safeDomain(bookmark.url);
       const icon = element("span", "shortcut-icon", [...name][0]?.toUpperCase() || "↗");
       icon.setAttribute("aria-hidden", "true");
