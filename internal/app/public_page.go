@@ -12,6 +12,7 @@ import (
 )
 
 var publicPageTemplate = template.Must(template.New("public.html").Funcs(template.FuncMap{
+	"assetURL": webui.AssetURL,
 	"domain": func(raw string) string {
 		u, err := url.Parse(raw)
 		if err != nil {

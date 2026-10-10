@@ -7,7 +7,9 @@ import (
 	"pageglean/internal/webui"
 )
 
-var indexTemplate = template.Must(template.ParseFS(webui.Assets, "assets/index.html"))
+var indexTemplate = template.Must(template.New("index.html").Funcs(template.FuncMap{
+	"assetURL": webui.AssetURL,
+}).ParseFS(webui.Assets, "assets/index.html"))
 
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	_, authenticated := a.currentUser(r)

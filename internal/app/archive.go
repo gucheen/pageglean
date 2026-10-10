@@ -5,6 +5,8 @@ import (
 	"html"
 	"net/http"
 	"strconv"
+
+	"pageglean/internal/webui"
 )
 
 func (a *App) handleArchiveRetry(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +56,9 @@ func (a *App) handleArchiveRead(w http.ResponseWriter, r *http.Request) {
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
-<title>%s · 拾页</title><link rel="stylesheet" href="/reader.css"></head>
+<title>%s · 拾页</title><link rel="stylesheet" href="%s"></head>
 <body><header class="reader-header"><a href="/">← 返回拾页</a><a href="%s" target="_blank" rel="noopener noreferrer">打开原网页 ↗</a></header><main>`,
-		html.EscapeString(bookmark.Title), html.EscapeString(bookmark.URL))
+		html.EscapeString(bookmark.Title), html.EscapeString(webui.AssetURL("reader.css")), html.EscapeString(bookmark.URL))
 	_, _ = w.Write(fragment)
 	_, _ = w.Write([]byte(`</main></body></html>`))
 }

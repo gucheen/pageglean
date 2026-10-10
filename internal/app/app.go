@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -98,11 +97,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("GET /api/export", a.requireAuth(http.HandlerFunc(a.handleExport)))
 	mux.Handle("GET /api/stats", a.requireAuth(http.HandlerFunc(a.handleStats)))
 
-	assets, err := fs.Sub(webui.Assets, "assets")
-	if err != nil {
-		panic(err)
-	}
-	static := http.FileServer(http.FS(assets))
+	mux.HandleFunc("GET /assets/", webui.ServeAsset)
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			http.NotFound(w, r)
@@ -116,7 +111,7 @@ func (a *App) routes() http.Handler {
 			a.handleIndex(w, r)
 			return
 		}
-		static.ServeHTTP(w, r)
+		webui.ServeAsset(w, r)
 	}))
 	return a.securityHeaders(a.originCheck(mux))
 }

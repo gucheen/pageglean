@@ -41,6 +41,8 @@ pageglean.example.com {
 
 在身份服务中创建服务端 OIDC 客户端，启用授权码流程和 PKCE S256，注册精确回调地址 `https://pageglean.example.com/api/auth/callback`。应用通过 issuer discovery 获取授权、令牌和 JWKS 地址，仅请求 `openid` scope。回调采用 GET（query response mode）；不支持 `form_post` 回调。
 
+前端 JS、CSS 和图标的 URL 自动包含文件内容的 SHA-256 hash，使用 `Cache-Control: public, max-age=31536000, immutable` 缓存一年。升级后内容变化会生成新 URL，无需手动清理浏览器缓存。原始资源 URL（如 `/app.js`）仍可访问，使用 `no-cache` 和 ETag 重新验证；不存在的 hash URL 返回 404 并使用 `no-store`。管理页和公开页 HTML 使用 `no-store`，归档阅读页保持 `private, max-age=3600`。反向代理应保留应用设置的缓存头。
+
 `PAGEGLEAN_OIDC_OWNER_SUBJECT` 是唯一允许访问私有资料的用户 `sub`，须从身份服务中获取该客户端下的实际值。不要使用邮箱或用户名，也不会把第一个登录者自动设为管理员。缺少任何 OIDC 配置或身份服务发现失败时，服务启动失败；CLI 备份和校验不要求 OIDC 配置。
 
 账号恢复和 MFA 由身份服务负责。应用退出登录会撤销本地会话，身份服务的 SSO 会话仍然保留。更改 issuer、客户端 ID 或 owner subject 后，已有本地会话失效。更换域名时同步更新公开 URL 和客户端回调地址。客户端密钥只配置在服务端，不要提交到仓库。
