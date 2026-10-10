@@ -8,11 +8,14 @@
 
 ```bash
 export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
+export PAGEGLEAN_OIDC_ISSUER=https://id.example.com
+export PAGEGLEAN_OIDC_CLIENT_ID=pageglean
+export PAGEGLEAN_OIDC_CLIENT_SECRET=your-client-secret
+export PAGEGLEAN_OIDC_OWNER_SUBJECT=your-user-sub
 export PAGEGLEAN_UID=$(id -u)
 export PAGEGLEAN_GID=$(id -g)
 mkdir -p data
 docker compose up --build -d
-docker compose exec pageglean /app/pageglean admin setup-link
 ```
 
 镜像默认以非 root 用户 `10001:10001` 运行。Compose 使用 `PAGEGLEAN_UID` 和 `PAGEGLEAN_GID` 让进程匹配宿主机部署用户，因此 `data/` 应由该用户创建和管理。
@@ -36,7 +39,11 @@ pageglean.example.com {
 }
 ```
 
-Passkey 与域名绑定。正式初始化后不要随意修改 `PAGEGLEAN_PUBLIC_URL` 或 `PAGEGLEAN_RP_ID`；必须迁移域名时，先在 VPS 上准备好 `admin recovery-link` 能力。
+在身份服务中创建服务端 OIDC 客户端，启用授权码流程和 PKCE S256，注册精确回调地址 `https://pageglean.example.com/api/auth/callback`。应用通过 issuer discovery 获取授权、令牌和 JWKS 地址，仅请求 `openid` scope。回调采用 GET（query response mode）；不支持 `form_post` 回调。
+
+`PAGEGLEAN_OIDC_OWNER_SUBJECT` 是唯一允许访问私有资料的用户 `sub`，须从身份服务中获取该客户端下的实际值。不要使用邮箱或用户名，也不会把第一个登录者自动设为管理员。缺少任何 OIDC 配置或身份服务发现失败时，服务启动失败；CLI 备份和校验不要求 OIDC 配置。
+
+账号恢复和 MFA 由身份服务负责。应用退出登录会撤销本地会话，身份服务的 SSO 会话仍然保留。更改 issuer、客户端 ID 或 owner subject 后，已有本地会话失效。更换域名时同步更新公开 URL 和客户端回调地址。客户端密钥只配置在服务端，不要提交到仓库。
 
 ## 网络抓取安全
 
@@ -78,14 +85,15 @@ pageglean.db
 blobs/
 ```
 
-然后把 `pageglean.db` 和 `blobs/` 放入新实例的 `PAGEGLEAN_DATA_DIR`，使用与原实例相同的公开域名/RP ID 启动。若使用不同域名，已有 Passkey 不适用，需要在新实例通过 CLI 创建恢复链接并注册新 Passkey。
+然后把 `pageglean.db` 和 `blobs/` 放入新实例的 `PAGEGLEAN_DATA_DIR`，配置 OIDC 后启动。若使用不同域名，同步修改 `PAGEGLEAN_PUBLIC_URL` 和身份服务中的客户端回调地址。
 
 ## 升级
 
 1. 先执行 `admin backup` 和 `admin verify-backup`。
 2. 拉取新版本并重新构建镜像。
 3. 启动时应用自动增加缺失列、数据表并重建 FTS5 索引。
-4. 检查 `/healthz` 和设置页中的书签/归档数量。
+4. 从 Passkey 版本升级时，配置上述 OIDC 环境变量并注册回调地址。书签、归档和用户数据保留；旧 Passkey 会话不再有效，`admin setup-link`、`admin recovery-link` 和 Passkey API 已移除。旧认证表保留在数据库中以兼容已有备份，但不再参与认证。
+5. 检查 `/healthz` 和设置页中的书签/归档数量。
 
 应用不会自动删除旧归档 Blob。后续如增加垃圾回收命令，应先保留经过校验的完整备份。
 

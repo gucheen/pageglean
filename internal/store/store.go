@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"database/sql"
 	_ "embed"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -16,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-webauthn/webauthn/webauthn"
 	_ "modernc.org/sqlite"
 
 	searchindex "pageglean/internal/search"
@@ -32,19 +29,6 @@ type Store struct {
 	now        func() time.Time
 	ftsEnabled bool
 }
-
-type User struct {
-	ID          int64
-	Handle      []byte
-	Name        string
-	DisplayName string
-	Credentials []webauthn.Credential
-}
-
-func (u *User) WebAuthnID() []byte                         { return u.Handle }
-func (u *User) WebAuthnName() string                       { return u.Name }
-func (u *User) WebAuthnDisplayName() string                { return u.DisplayName }
-func (u *User) WebAuthnCredentials() []webauthn.Credential { return u.Credentials }
 
 type Bookmark struct {
 	Home       bool   `json:"home"`
@@ -188,10 +172,9 @@ func (s *Store) init(ctx context.Context) error {
 		}
 	}
 	_, err := s.db.ExecContext(ctx, `
-		DELETE FROM webauthn_ceremonies WHERE expires_at <= ?;
-		DELETE FROM app_sessions WHERE expires_at <= ?;
-		DELETE FROM admin_tokens WHERE expires_at <= ? OR used_at IS NOT NULL;
-	`, formatTime(s.now()), formatTime(s.now()), formatTime(s.now()))
+		DELETE FROM oidc_logins WHERE expires_at <= ?;
+		DELETE FROM oidc_app_sessions WHERE expires_at <= ?;
+	`, formatTime(s.now()), formatTime(s.now()))
 	if err != nil {
 		return fmt.Errorf("cleanup expired data: %w", err)
 	}
@@ -311,110 +294,7 @@ func (s *Store) ensureBookmarkColumns(ctx context.Context) error {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) LoadOwner(ctx context.Context) (*User, error) {
-	return s.loadUser(ctx, `SELECT id, webauthn_handle, name, display_name FROM users WHERE id = 1`)
-}
-
-func (s *Store) LoadUserByHandle(ctx context.Context, handle []byte) (*User, error) {
-	user, err := s.loadUser(ctx, `SELECT id, webauthn_handle, name, display_name FROM users WHERE webauthn_handle = ?`, handle)
-	if err != nil {
-		return nil, err
-	}
-	if subtle.ConstantTimeCompare(user.Handle, handle) != 1 {
-		return nil, ErrNotFound
-	}
-	return user, nil
-}
-
-func (s *Store) loadUser(ctx context.Context, query string, args ...any) (*User, error) {
-	user := &User{}
-	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&user.ID, &user.Handle, &user.Name, &user.DisplayName); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, fmt.Errorf("load user: %w", err)
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT credential_json FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at
-	`, user.ID)
-	if err != nil {
-		return nil, fmt.Errorf("load credentials: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("scan credential: %w", err)
-		}
-		var credential webauthn.Credential
-		if err := json.Unmarshal(raw, &credential); err != nil {
-			return nil, fmt.Errorf("decode credential: %w", err)
-		}
-		user.Credentials = append(user.Credentials, credential)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate credentials: %w", err)
-	}
-	return user, nil
-}
-
-func (s *Store) CredentialCount(ctx context.Context) (int, error) {
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webauthn_credentials`).Scan(&count); err != nil {
-		return 0, fmt.Errorf("count credentials: %w", err)
-	}
-	return count, nil
-}
-
-func (s *Store) AddCredential(ctx context.Context, userID int64, rpID, label string, credential *webauthn.Credential) error {
-	raw, err := json.Marshal(credential)
-	if err != nil {
-		return fmt.Errorf("encode credential: %w", err)
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO webauthn_credentials
-		    (credential_id, user_id, rp_id, credential_json, label, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, credential.ID, userID, rpID, raw, label, formatTime(s.now()))
-	if err != nil {
-		return fmt.Errorf("save credential: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) UpdateCredential(ctx context.Context, credential *webauthn.Credential) error {
-	raw, err := json.Marshal(credential)
-	if err != nil {
-		return fmt.Errorf("encode credential: %w", err)
-	}
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE webauthn_credentials
-		SET credential_json = ?, last_used_at = ?
-		WHERE credential_id = ?
-	`, raw, formatTime(s.now()), credential.ID)
-	if err != nil {
-		return fmt.Errorf("update credential: %w", err)
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) CreateAdminToken(ctx context.Context, kind string, ttl time.Duration) (string, error) {
-	if kind != "setup" && kind != "recovery" {
-		return "", fmt.Errorf("unsupported admin token kind %q", kind)
-	}
-	count, err := s.CredentialCount(ctx)
-	if err != nil {
-		return "", err
-	}
-	if kind == "setup" && count != 0 {
-		return "", fmt.Errorf("setup is already complete; use recovery-link to register another passkey")
-	}
-	if kind == "recovery" && count == 0 {
-		return "", fmt.Errorf("setup is not complete; use setup-link first")
-	}
+func (s *Store) CreateAppSession(ctx context.Context, userID int64, ttl time.Duration, identity string) (string, error) {
 	token, raw, err := randomToken()
 	if err != nil {
 		return "", err
@@ -422,130 +302,16 @@ func (s *Store) CreateAdminToken(ctx context.Context, kind string, ttl time.Dura
 	hash := sha256.Sum256(raw)
 	now := s.now().UTC()
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO admin_tokens (token_hash, kind, expires_at, created_at)
-		VALUES (?, ?, ?, ?)
-	`, hash[:], kind, formatTime(now.Add(ttl)), formatTime(now))
-	if err != nil {
-		return "", fmt.Errorf("save admin token: %w", err)
-	}
-	return token, nil
-}
-
-func (s *Store) ValidateAdminToken(ctx context.Context, token string) ([]byte, string, error) {
-	raw, err := decodeToken(token)
-	if err != nil {
-		return nil, "", ErrNotFound
-	}
-	hash := sha256.Sum256(raw)
-	var kind, expiresAt string
-	var usedAt sql.NullString
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT kind, expires_at, used_at FROM admin_tokens WHERE token_hash = ?
-	`, hash[:]).Scan(&kind, &expiresAt, &usedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, "", ErrNotFound
-		}
-		return nil, "", err
-	}
-	expires, err := parseTime(expiresAt)
-	if err != nil || !expires.After(s.now()) || usedAt.Valid {
-		return nil, "", ErrNotFound
-	}
-	return hash[:], kind, nil
-}
-
-func (s *Store) ConsumeAdminToken(ctx context.Context, hash []byte) error {
-	result, err := s.db.ExecContext(ctx, `
-		UPDATE admin_tokens SET used_at = ?
-		WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?
-	`, formatTime(s.now()), hash, formatTime(s.now()))
-	if err != nil {
-		return fmt.Errorf("consume admin token: %w", err)
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) CreateCeremony(ctx context.Context, kind string, session *webauthn.SessionData, adminTokenHash []byte) (string, error) {
-	token, raw, err := randomToken()
-	if err != nil {
-		return "", err
-	}
-	hash := sha256.Sum256(raw)
-	encoded, err := json.Marshal(session)
-	if err != nil {
-		return "", fmt.Errorf("encode WebAuthn session: %w", err)
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO webauthn_ceremonies
-		    (id_hash, kind, session_json, admin_token_hash, expires_at, created_at)
+		INSERT INTO oidc_app_sessions (token_hash, user_id, expires_at, created_at, last_seen_at, identity)
 		VALUES (?, ?, ?, ?, ?, ?)
-	`, hash[:], kind, encoded, nullableBytes(adminTokenHash), formatTime(session.Expires), formatTime(s.now()))
-	if err != nil {
-		return "", fmt.Errorf("save WebAuthn session: %w", err)
-	}
-	return token, nil
-}
-
-func (s *Store) TakeCeremony(ctx context.Context, token, kind string) (*webauthn.SessionData, []byte, error) {
-	raw, err := decodeToken(token)
-	if err != nil {
-		return nil, nil, ErrNotFound
-	}
-	hash := sha256.Sum256(raw)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer tx.Rollback()
-	var encoded, adminHash []byte
-	var expiresAt string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT session_json, admin_token_hash, expires_at
-		FROM webauthn_ceremonies WHERE id_hash = ? AND kind = ?
-	`, hash[:], kind).Scan(&encoded, &adminHash, &expiresAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, ErrNotFound
-		}
-		return nil, nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM webauthn_ceremonies WHERE id_hash = ?`, hash[:]); err != nil {
-		return nil, nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, nil, err
-	}
-	expires, err := parseTime(expiresAt)
-	if err != nil || !expires.After(s.now()) {
-		return nil, nil, ErrNotFound
-	}
-	var session webauthn.SessionData
-	if err := json.Unmarshal(encoded, &session); err != nil {
-		return nil, nil, fmt.Errorf("decode WebAuthn session: %w", err)
-	}
-	return &session, adminHash, nil
-}
-
-func (s *Store) CreateAppSession(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
-	token, raw, err := randomToken()
-	if err != nil {
-		return "", err
-	}
-	hash := sha256.Sum256(raw)
-	now := s.now().UTC()
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO app_sessions (token_hash, user_id, expires_at, created_at, last_seen_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, hash[:], userID, formatTime(now.Add(ttl)), formatTime(now), formatTime(now))
+	`, hash[:], userID, formatTime(now.Add(ttl)), formatTime(now), formatTime(now), identity)
 	if err != nil {
 		return "", fmt.Errorf("save app session: %w", err)
 	}
 	return token, nil
 }
 
-func (s *Store) ValidateAppSession(ctx context.Context, token string) (int64, error) {
+func (s *Store) ValidateAppSession(ctx context.Context, token, identity string) (int64, error) {
 	raw, err := decodeToken(token)
 	if err != nil {
 		return 0, ErrNotFound
@@ -554,8 +320,8 @@ func (s *Store) ValidateAppSession(ctx context.Context, token string) (int64, er
 	var userID int64
 	var expiresAt string
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT user_id, expires_at FROM app_sessions WHERE token_hash = ?
-	`, hash[:]).Scan(&userID, &expiresAt); err != nil {
+		SELECT user_id, expires_at FROM oidc_app_sessions WHERE token_hash = ? AND identity = ?
+	`, hash[:], identity).Scan(&userID, &expiresAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, ErrNotFound
 		}
@@ -563,10 +329,10 @@ func (s *Store) ValidateAppSession(ctx context.Context, token string) (int64, er
 	}
 	expires, err := parseTime(expiresAt)
 	if err != nil || !expires.After(s.now()) {
-		_, _ = s.db.ExecContext(ctx, `DELETE FROM app_sessions WHERE token_hash = ?`, hash[:])
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM oidc_app_sessions WHERE token_hash = ?`, hash[:])
 		return 0, ErrNotFound
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE app_sessions SET last_seen_at = ? WHERE token_hash = ?`, formatTime(s.now()), hash[:])
+	_, _ = s.db.ExecContext(ctx, `UPDATE oidc_app_sessions SET last_seen_at = ? WHERE token_hash = ?`, formatTime(s.now()), hash[:])
 	return userID, nil
 }
 
@@ -576,7 +342,7 @@ func (s *Store) DeleteAppSession(ctx context.Context, token string) error {
 		return nil
 	}
 	hash := sha256.Sum256(raw)
-	_, err = s.db.ExecContext(ctx, `DELETE FROM app_sessions WHERE token_hash = ?`, hash[:])
+	_, err = s.db.ExecContext(ctx, `DELETE FROM oidc_app_sessions WHERE token_hash = ?`, hash[:])
 	return err
 }
 
@@ -1337,11 +1103,4 @@ func decodeToken(token string) ([]byte, error) {
 		return nil, errors.New("invalid token length")
 	}
 	return base64.RawURLEncoding.DecodeString(token)
-}
-
-func nullableBytes(value []byte) any {
-	if len(value) == 0 {
-		return nil
-	}
-	return value
 }

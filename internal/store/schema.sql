@@ -8,40 +8,19 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS webauthn_credentials (
-    credential_id BLOB PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    rp_id TEXT NOT NULL,
-    credential_json BLOB NOT NULL,
-    label TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    last_used_at TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
-
-CREATE TABLE IF NOT EXISTS webauthn_ceremonies (
+CREATE TABLE IF NOT EXISTS oidc_logins (
     id_hash BLOB PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('registration', 'login')),
     session_json BLOB NOT NULL,
-    admin_token_hash BLOB,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    expires_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS admin_tokens (
-    token_hash BLOB PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind IN ('setup', 'recovery')),
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    used_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS app_sessions (
+CREATE TABLE IF NOT EXISTS oidc_app_sessions (
     token_hash BLOB PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    identity TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS bookmarks (

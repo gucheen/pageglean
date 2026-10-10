@@ -25,7 +25,7 @@ func (f publicationTransport) RoundTrip(r *http.Request) (*http.Response, error)
 
 func TestPublicationAPISeparatesPublicAndPrivateFields(t *testing.T) {
 	a, data := newTestApp(t)
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, a.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}

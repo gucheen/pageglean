@@ -115,28 +115,6 @@ func TestFTSPrefixSearchMatchesLatinTokenPrefixes(t *testing.T) {
 	}
 }
 
-func TestAdminTokenRules(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	token, err := s.CreateAdminToken(ctx, "setup", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash, kind, err := s.ValidateAdminToken(ctx, token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if kind != "setup" {
-		t.Fatalf("kind = %q", kind)
-	}
-	if err := s.ConsumeAdminToken(ctx, hash); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.ValidateAdminToken(ctx, token); err == nil {
-		t.Fatal("consumed token remained valid")
-	}
-}
-
 func TestOpenMigratesStageOneBookmarkTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pageglean.db")
 	db, err := sql.Open("sqlite", path)

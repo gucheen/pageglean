@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -67,7 +66,7 @@ func serve(cfg config.Config, data *store.Store) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("PageGlean started", "addr", cfg.Addr, "public_url", cfg.PublicURL, "rp_id", cfg.RPID)
+		logger.Info("PageGlean started", "addr", cfg.Addr, "public_url", cfg.PublicURL, "oidc_issuer", cfg.OIDCIssuer)
 		errCh <- server.ListenAndServe()
 	}()
 
@@ -89,7 +88,7 @@ func serve(cfg config.Config, data *store.Store) error {
 
 func admin(cfg config.Config, data *store.Store, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing admin command; use setup-link, recovery-link, backup, or verify-backup")
+		return fmt.Errorf("missing admin command; use backup or verify-backup")
 	}
 	if args[0] == "backup" {
 		return createBackup(cfg, data, args[1:])
@@ -97,37 +96,7 @@ func admin(cfg config.Config, data *store.Store, args []string) error {
 	if args[0] == "verify-backup" {
 		return verifyBackup(args[1:])
 	}
-	kind := ""
-	switch args[0] {
-	case "setup-link":
-		kind = "setup"
-	case "recovery-link":
-		kind = "recovery"
-	default:
-		return fmt.Errorf("unknown admin command %q", args[0])
-	}
-	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	ttl := flags.Duration("ttl", 10*time.Minute, "one-time link lifetime")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	if *ttl < time.Minute || *ttl > time.Hour {
-		return fmt.Errorf("ttl must be between 1m and 1h")
-	}
-	token, err := data.CreateAdminToken(context.Background(), kind, *ttl)
-	if err != nil {
-		return err
-	}
-	link, err := url.Parse(cfg.PublicURL)
-	if err != nil {
-		return err
-	}
-	link.Path = "/setup"
-	query := link.Query()
-	query.Set("token", token)
-	link.RawQuery = query.Encode()
-	fmt.Println(link.String())
-	return nil
+	return fmt.Errorf("unknown admin command %q; use backup or verify-backup", args[0])
 }
 
 func createBackup(cfg config.Config, data *store.Store, args []string) error {

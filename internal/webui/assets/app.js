@@ -11,7 +11,6 @@ const state = {
   captureInitialized: false,
   importFile: null,
   importMapping: {},
-  setupToken: new URLSearchParams(location.search).get("token") || "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -45,111 +44,9 @@ async function request(path, options = {}) {
   return payload;
 }
 
-function base64URLToBytes(value) {
-  const padding = "=".repeat((4 - (value.length % 4)) % 4);
-  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
-  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-}
-
-function bytesToBase64URL(value) {
-  const bytes = new Uint8Array(value);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function creationOptions(payload) {
-  const options = structuredClone(payload.publicKey || payload);
-  options.challenge = base64URLToBytes(options.challenge);
-  options.user.id = base64URLToBytes(options.user.id);
-  options.excludeCredentials = (options.excludeCredentials || []).map((item) => ({
-    ...item,
-    id: base64URLToBytes(item.id),
-  }));
-  return options;
-}
-
-function requestOptions(payload) {
-  const options = structuredClone(payload.publicKey || payload);
-  options.challenge = base64URLToBytes(options.challenge);
-  options.allowCredentials = (options.allowCredentials || []).map((item) => ({
-    ...item,
-    id: base64URLToBytes(item.id),
-  }));
-  return options;
-}
-
-function credentialJSON(credential) {
-  if (typeof credential.toJSON === "function") return credential.toJSON();
-  const response = credential.response;
-  const result = {
-    id: credential.id,
-    rawId: bytesToBase64URL(credential.rawId),
-    type: credential.type,
-    authenticatorAttachment: credential.authenticatorAttachment,
-    clientExtensionResults: credential.getClientExtensionResults(),
-    response: {
-      clientDataJSON: bytesToBase64URL(response.clientDataJSON),
-    },
-  };
-  if (response.attestationObject) {
-    result.response.attestationObject = bytesToBase64URL(response.attestationObject);
-    result.response.transports = response.getTransports?.() || [];
-  } else {
-    result.response.authenticatorData = bytesToBase64URL(response.authenticatorData);
-    result.response.signature = bytesToBase64URL(response.signature);
-    result.response.userHandle = response.userHandle ? bytesToBase64URL(response.userHandle) : null;
-  }
-  return result;
-}
-
-async function registerPasskey() {
-  setButtonBusy(authButton, true, "正在创建 Passkey…");
-  authError.textContent = "";
-  try {
-    const payload = await request("/api/auth/register/start", {
-      method: "POST",
-      body: JSON.stringify({ token: state.setupToken, label: "Passkey" }),
-    });
-    const credential = await navigator.credentials.create({ publicKey: creationOptions(payload) });
-    await request("/api/auth/register/finish", {
-      method: "POST",
-      body: JSON.stringify(credentialJSON(credential)),
-    });
-    history.replaceState({}, "", "/");
-    state.setupToken = "";
-    showApp();
-    await loadBookmarks();
-  } catch (error) {
-    authError.textContent = friendlyCredentialError(error);
-  } finally {
-    setButtonBusy(authButton, false, "注册 Passkey");
-  }
-}
-
-async function loginPasskey() {
-  setButtonBusy(authButton, true, "等待 Passkey…");
-  authError.textContent = "";
-  try {
-    const payload = await request("/api/auth/login/start", { method: "POST" });
-    const credential = await navigator.credentials.get({ publicKey: requestOptions(payload) });
-    await request("/api/auth/login/finish", {
-      method: "POST",
-      body: JSON.stringify(credentialJSON(credential)),
-    });
-    showApp();
-    await loadBookmarks();
-  } catch (error) {
-    authError.textContent = friendlyCredentialError(error);
-  } finally {
-    setButtonBusy(authButton, false, "使用 Passkey");
-  }
-}
-
-function friendlyCredentialError(error) {
-  if (error?.name === "NotAllowedError") return "操作已取消，或 Passkey 请求已超时。";
-  if (error?.name === "InvalidStateError") return "这个 Passkey 已经注册。";
-  return error?.message || "Passkey 操作失败。";
+function loginOIDC() {
+  const returnTo = location.pathname + location.search + location.hash;
+  location.assign(`/api/auth/login?${new URLSearchParams({ return_to: returnTo })}`);
 }
 
 function setButtonBusy(button, busy, label) {
@@ -162,7 +59,6 @@ async function init() {
   try {
     let status = {
       authenticated: document.body.dataset.authenticated === "true",
-      setupRequired: document.body.dataset.setupRequired === "true",
     };
     // Cross-site bookmarklet navigation omits Strict cookies; a same-origin request can recover the session.
     if (!status.authenticated) status = await request("/api/status", { cache: "no-store" });
@@ -197,27 +93,11 @@ function showAuth(status) {
   captureView.hidden = true;
   if (bookmarkDialog.open) bookmarkDialog.close();
   authView.hidden = false;
-  const setupHelp = $("#setupHelp");
-  if (state.setupToken) {
-    $("#authTitle").textContent = status.setupRequired ? "创建你的 Passkey" : "恢复访问权限";
-    $("#authDescription").textContent = "这个一次性链接将注册一个新的 Passkey，完成后链接立即失效。";
-    authButton.textContent = "注册 Passkey";
-    authButton.hidden = false;
-    setupHelp.hidden = true;
-    authButton.onclick = registerPasskey;
-  } else if (status.setupRequired) {
-    $("#authTitle").textContent = "完成首次初始化";
-    $("#authDescription").textContent = "先从服务器生成一个短时有效的初始化地址。";
-    authButton.hidden = true;
-    setupHelp.hidden = false;
-  } else {
-    $("#authTitle").textContent = "用 Passkey 登录";
-    $("#authDescription").textContent = "登录后使用书签首页和资料库；只有你主动公开的书签可供访客查看。";
-    authButton.textContent = "使用 Passkey";
-    authButton.hidden = false;
-    setupHelp.hidden = true;
-    authButton.onclick = loginPasskey;
-  }
+  $("#authTitle").textContent = "登录拾页";
+  $("#authDescription").textContent = "使用你的身份服务登录，访问书签首页和资料库。";
+  authButton.textContent = "使用 OIDC 登录";
+  authButton.hidden = false;
+  authButton.onclick = loginOIDC;
 }
 
 function showApp() {
@@ -284,7 +164,7 @@ async function loadBookmarks(append = false) {
     renderBookmarks();
   } catch (error) {
     if (version !== bookmarkLoadVersion) return;
-    if (error.message.includes("Passkey")) {
+    if (error.status === 401) {
       const status = await request("/api/status");
       showAuth(status);
       return;

@@ -1,234 +1,150 @@
 package app
 
 import (
-	"bytes"
-	"errors"
+	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
-	"github.com/go-webauthn/webauthn/protocol"
-	"github.com/go-webauthn/webauthn/webauthn"
-
-	"pageglean/internal/store"
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 )
 
 const (
-	sessionCookieName  = "pageglean_session"
-	ceremonyCookieName = "pageglean_webauthn"
+	sessionCookieName = "pageglean_session"
+	loginCookieName   = "pageglean_oidc"
+	loginTTL          = 5 * time.Minute
 )
 
-type registrationStartRequest struct {
-	Token string `json:"token"`
-	Label string `json:"label"`
+type oidcLogin struct {
+	State    string `json:"state"`
+	Nonce    string `json:"nonce"`
+	Verifier string `json:"verifier"`
+	ReturnTo string `json:"returnTo"`
+	Identity string `json:"identity"`
 }
 
-func (a *App) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
-	var input registrationStartRequest
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	count, err := a.store.CredentialCount(r.Context())
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-
-	var adminHash []byte
-	if input.Token != "" {
-		var kind string
-		adminHash, kind, err = a.store.ValidateAdminToken(r.Context(), input.Token)
-		if err != nil || (kind == "setup" && count != 0) || (kind == "recovery" && count == 0) {
-			writeError(w, http.StatusUnauthorized, "初始化或恢复链接无效或已过期")
-			return
-		}
-	} else if _, ok := a.currentUser(r); !ok {
-		writeError(w, http.StatusUnauthorized, "需要有效的初始化、恢复链接或登录会话")
-		return
-	}
-
-	user, err := a.store.LoadOwner(r.Context())
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	creation, session, err := a.webauthn.BeginRegistration(
-		user,
-		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
-		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
-			ResidentKey:      protocol.ResidentKeyRequirementRequired,
-			UserVerification: protocol.VerificationRequired,
-		}),
-		webauthn.WithExclusions(webauthn.Credentials(user.Credentials).CredentialDescriptors()),
-	)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	ceremonyToken, err := a.store.CreateCeremony(r.Context(), "registration", session, adminHash)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	a.setCeremonyCookie(w, ceremonyToken, session.Expires)
-	writeJSON(w, http.StatusOK, creation)
+func (a *App) authIdentity() string {
+	encoded, _ := json.Marshal([]string{a.cfg.OIDCIssuer, a.cfg.OIDCClientID, a.cfg.OIDCOwnerSubject})
+	hash := sha256.Sum256(encoded)
+	return hex.EncodeToString(hash[:])
 }
 
-func (a *App) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(ceremonyCookieName)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Passkey 注册会话已过期")
-		return
+func safeReturnTo(value string) string {
+	u, err := url.Parse(value)
+	if err != nil || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.ContainsAny(value, "\\\r\n") || u.IsAbs() || u.Host != "" || u.Path == "" || strings.HasPrefix(u.Path, "//") || strings.ContainsAny(u.Path, "\\\r\n") || strings.HasPrefix(u.Path, "/api/") {
+		return "/"
 	}
-	session, adminHash, err := a.store.TakeCeremony(r.Context(), cookie.Value, "registration")
-	a.clearCeremonyCookie(w)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Passkey 注册会话已过期")
-		return
-	}
-	user, err := a.store.LoadOwner(r.Context())
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	credential, err := a.webauthn.FinishRegistration(user, *session, r)
-	if err != nil {
-		a.logger.Warn("Passkey registration rejected", "error", err)
-		writeError(w, http.StatusBadRequest, "无法验证 Passkey 注册结果")
-		return
-	}
-	if len(adminHash) > 0 {
-		if err := a.store.ConsumeAdminToken(r.Context(), adminHash); err != nil {
-			writeError(w, http.StatusUnauthorized, "初始化或恢复链接已经失效")
-			return
-		}
-	}
-	if err := a.store.AddCredential(r.Context(), user.ID, a.cfg.RPID, "Passkey", credential); err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	if err := a.startAppSession(w, r, user.ID); err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, map[string]bool{"ok": true})
+	return u.String()
 }
 
-func (a *App) handleLoginStart(w http.ResponseWriter, r *http.Request) {
-	count, err := a.store.CredentialCount(r.Context())
+func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	login := oidcLogin{State: oauth2.GenerateVerifier(), Nonce: oauth2.GenerateVerifier(), Verifier: oauth2.GenerateVerifier(), ReturnTo: safeReturnTo(r.URL.Query().Get("return_to")), Identity: a.authIdentity()}
+	encoded, err := json.Marshal(login)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	if count == 0 {
-		writeError(w, http.StatusConflict, "应用尚未完成初始化")
-		return
+	// Replacing a browser's pending login invalidates its previous callback.
+	if cookie, err := r.Cookie(loginCookieName); err == nil {
+		_, _ = a.store.TakeOIDCLogin(r.Context(), cookie.Value)
 	}
-	assertion, session, err := a.webauthn.BeginDiscoverableLogin(
-		webauthn.WithUserVerification(protocol.VerificationRequired),
-	)
+	token, err := a.store.CreateOIDCLogin(r.Context(), encoded, loginTTL)
 	if err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	ceremonyToken, err := a.store.CreateCeremony(r.Context(), "login", session, nil)
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
-	a.setCeremonyCookie(w, ceremonyToken, session.Expires)
-	writeJSON(w, http.StatusOK, assertion)
+	a.loginCookie(w, token, int(loginTTL.Seconds()))
+	http.Redirect(w, r, a.oauthConfig.AuthCodeURL(login.State, oidc.Nonce(login.Nonce), oauth2.S256ChallengeOption(login.Verifier), oauth2.SetAuthURLParam("response_mode", "query")), http.StatusFound)
 }
 
-func (a *App) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(ceremonyCookieName)
+func (a *App) handleCallback(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	cookie, err := r.Cookie(loginCookieName)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "Passkey 登录会话已过期")
+		writeError(w, http.StatusBadRequest, "登录请求已过期，请重新登录")
 		return
 	}
-	session, _, err := a.store.TakeCeremony(r.Context(), cookie.Value, "login")
-	a.clearCeremonyCookie(w)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "Passkey 登录会话已过期")
+	encoded, err := a.store.TakeOIDCLogin(r.Context(), cookie.Value)
+	a.loginCookie(w, "", -1)
+	var login oidcLogin
+	if err != nil || json.Unmarshal(encoded, &login) != nil || login.Identity != a.authIdentity() || login.State == "" || subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(login.State)) != 1 {
+		writeError(w, http.StatusBadRequest, "登录请求无效或已过期，请重新登录")
 		return
 	}
-	validatedUser, credential, err := a.webauthn.FinishPasskeyLogin(
-		func(rawID, userHandle []byte) (webauthn.User, error) {
-			user, err := a.store.LoadUserByHandle(r.Context(), userHandle)
-			if err != nil {
-				return nil, err
-			}
-			for _, saved := range user.Credentials {
-				if bytes.Equal(saved.ID, rawID) {
-					return user, nil
-				}
-			}
-			return nil, store.ErrNotFound
-		},
-		*session,
-		r,
-	)
-	if err != nil {
-		a.logger.Warn("Passkey login rejected", "error", err)
-		writeError(w, http.StatusUnauthorized, "无法验证 Passkey")
+	if r.URL.Query().Get("error") != "" || r.URL.Query().Get("code") == "" {
+		writeError(w, http.StatusUnauthorized, "身份服务未完成登录，请重新登录")
 		return
 	}
-	user, ok := validatedUser.(*store.User)
+	ctx, cancel := context.WithTimeout(oidc.ClientContext(r.Context(), a.authClient), 20*time.Second)
+	defer cancel()
+	token, err := a.oauthConfig.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(login.Verifier))
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "无法完成身份验证，请重新登录")
+		return
+	}
+	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok {
-		a.internalError(w, r, errors.New("unexpected WebAuthn user type"))
+		writeError(w, http.StatusUnauthorized, "身份服务未返回有效的身份令牌")
 		return
 	}
-	if err := a.store.UpdateCredential(r.Context(), credential); err != nil {
+	idToken, err := a.oidcVerifier.Verify(ctx, rawIDToken)
+	if err != nil || idToken.Nonce == "" || subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(login.Nonce)) != 1 {
+		writeError(w, http.StatusUnauthorized, "身份令牌验证失败，请重新登录")
+		return
+	}
+	if idToken.Subject == "" || idToken.Subject != a.cfg.OIDCOwnerSubject {
+		writeError(w, http.StatusForbidden, "此账号无权访问拾页")
+		return
+	}
+	if idToken.AccessTokenHash != "" {
+		if err := idToken.VerifyAccessToken(token.AccessToken); err != nil {
+			writeError(w, http.StatusUnauthorized, "身份令牌验证失败，请重新登录")
+			return
+		}
+	}
+	if err := a.startAppSession(w, r, 1); err != nil {
 		a.internalError(w, r, err)
 		return
 	}
-	if err := a.startAppSession(w, r, user.ID); err != nil {
-		a.internalError(w, r, err)
-		return
+	http.Redirect(w, r, safeReturnTo(login.ReturnTo), http.StatusSeeOther)
+}
+
+func (a *App) loginCookie(w http.ResponseWriter, token string, maxAge int) {
+	cookie := &http.Cookie{Name: loginCookieName, Value: token, Path: "/api/auth/", MaxAge: maxAge, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteLaxMode}
+	if maxAge > 0 {
+		cookie.Expires = time.Now().Add(loginTTL)
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	http.SetCookie(w, cookie)
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
-		_ = a.store.DeleteAppSession(r.Context(), cookie.Value)
+		if err := a.store.DeleteAppSession(r.Context(), cookie.Value); err != nil {
+			a.internalError(w, r, err)
+			return
+		}
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (a *App) startAppSession(w http.ResponseWriter, r *http.Request, userID int64) error {
-	token, err := a.store.CreateAppSession(r.Context(), userID, sessionExpiry())
+	if cookie, err := r.Cookie(sessionCookieName); err == nil {
+		if err := a.store.DeleteAppSession(r.Context(), cookie.Value); err != nil {
+			return err
+		}
+	}
+	token, err := a.store.CreateAppSession(r.Context(), userID, sessionExpiry(), a.authIdentity())
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookieName, Value: token, Path: "/",
-		Expires: a.storeTime().Add(sessionExpiry()), MaxAge: int(sessionExpiry().Seconds()),
-		HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode,
-	})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: token, Path: "/", Expires: time.Now().Add(sessionExpiry()), MaxAge: int(sessionExpiry().Seconds()), HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode})
 	return nil
 }
-
-func (a *App) setCeremonyCookie(w http.ResponseWriter, token string, expires time.Time) {
-	maxAge := int(time.Until(expires).Seconds())
-	if maxAge <= 0 {
-		maxAge = 300
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name: ceremonyCookieName, Value: token, Path: "/api/auth/",
-		Expires: expires, MaxAge: maxAge,
-		HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode,
-	})
-}
-
-func (a *App) clearCeremonyCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
-		Name: ceremonyCookieName, Value: "", Path: "/api/auth/", MaxAge: -1,
-		HttpOnly: true, Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode,
-	})
-}
-
-func (a *App) storeTime() time.Time { return time.Now().UTC() }

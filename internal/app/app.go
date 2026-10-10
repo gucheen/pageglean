@@ -11,7 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 
 	"pageglean/internal/archive"
 	"pageglean/internal/config"
@@ -22,7 +23,9 @@ import (
 type App struct {
 	cfg           config.Config
 	store         *store.Store
-	webauthn      *webauthn.WebAuthn
+	oidcVerifier  *oidc.IDTokenVerifier
+	oauthConfig   oauth2.Config
+	authClient    *http.Client
 	archiver      *archive.Archiver
 	logger        *slog.Logger
 	handler       http.Handler
@@ -31,32 +34,26 @@ type App struct {
 	publication   PublicationNotification
 }
 
-const webAuthnCeremonyTimeout = 5 * time.Minute
-
 func New(cfg config.Config, data *store.Store, logger *slog.Logger) (*App, error) {
 	if err := config.ValidateWebhookConfig(cfg.WebhookMode, cfg.WebhookURL, cfg.WebhookSecret, cfg.WebhookToken); err != nil {
 		return nil, err
 	}
-	wa, err := webauthn.New(&webauthn.Config{
-		RPDisplayName: "拾页",
-		RPID:          cfg.RPID,
-		RPOrigins:     []string{cfg.PublicOrigin},
-		Timeouts: webauthn.TimeoutsConfig{
-			Login: webauthn.TimeoutConfig{
-				Enforce: true, Timeout: webAuthnCeremonyTimeout, TimeoutUVD: webAuthnCeremonyTimeout,
-			},
-			Registration: webauthn.TimeoutConfig{
-				Enforce: true, Timeout: webAuthnCeremonyTimeout, TimeoutUVD: webAuthnCeremonyTimeout,
-			},
-		},
-	})
+	if err := cfg.ValidateOIDC(); err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 15 * time.Second}
+	ctx, cancel := context.WithTimeout(oidc.ClientContext(context.Background(), client), 15*time.Second)
+	defer cancel()
+	provider, err := oidc.NewProvider(ctx, cfg.OIDCIssuer)
 	if err != nil {
-		return nil, fmt.Errorf("configure WebAuthn: %w", err)
+		return nil, fmt.Errorf("discover OIDC provider: %w", err)
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	a := &App{cfg: cfg, store: data, webauthn: wa, logger: logger}
+	a := &App{cfg: cfg, store: data, logger: logger, authClient: client}
+	a.oidcVerifier = provider.VerifierContext(oidc.ClientContext(context.Background(), client), &oidc.Config{ClientID: cfg.OIDCClientID})
+	a.oauthConfig = oauth2.Config{ClientID: cfg.OIDCClientID, ClientSecret: cfg.OIDCClientSecret, Endpoint: provider.Endpoint(), RedirectURL: cfg.PublicURL + "/api/auth/callback", Scopes: []string{oidc.ScopeOpenID}}
 	a.archiver = archive.New(cfg, data, logger)
 	a.webhookClient = &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	feed, err := data.PublicFeed(context.Background())
@@ -85,10 +82,8 @@ func (a *App) routes() http.Handler {
 	mux.Handle("GET /api/publication", a.requireAuth(http.HandlerFunc(a.handlePublicationStatus)))
 	mux.Handle("POST /api/publication/retry", a.requireAuth(http.HandlerFunc(a.handlePublicationRetry)))
 	mux.HandleFunc("GET /api/status", a.handleStatus)
-	mux.HandleFunc("POST /api/auth/register/start", a.handleRegisterStart)
-	mux.HandleFunc("POST /api/auth/register/finish", a.handleRegisterFinish)
-	mux.HandleFunc("POST /api/auth/login/start", a.handleLoginStart)
-	mux.HandleFunc("POST /api/auth/login/finish", a.handleLoginFinish)
+	mux.HandleFunc("GET /api/auth/login", a.handleLogin)
+	mux.HandleFunc("GET /api/auth/callback", a.handleCallback)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
 	mux.Handle("GET /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksList)))
 	mux.Handle("POST /api/bookmarks", a.requireAuth(http.HandlerFunc(a.handleBookmarksCreate)))
@@ -157,7 +152,7 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := a.currentUser(r)
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "需要使用 Passkey 登录")
+			writeError(w, http.StatusUnauthorized, "需要登录")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey, userID)))
@@ -169,7 +164,7 @@ func (a *App) currentUser(r *http.Request) (int64, bool) {
 	if err != nil || cookie.Value == "" {
 		return 0, false
 	}
-	userID, err := a.store.ValidateAppSession(r.Context(), cookie.Value)
+	userID, err := a.store.ValidateAppSession(r.Context(), cookie.Value, a.authIdentity())
 	return userID, err == nil
 }
 
@@ -178,14 +173,9 @@ func (a *App) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) handleStatus(w http.ResponseWriter, r *http.Request) {
-	count, err := a.store.CredentialCount(r.Context())
-	if err != nil {
-		a.internalError(w, r, err)
-		return
-	}
+	w.Header().Set("Cache-Control", "no-store")
 	_, authenticated := a.currentUser(r)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"setupRequired": count == 0,
 		"authenticated": authenticated,
 	})
 }

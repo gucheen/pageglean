@@ -16,7 +16,10 @@ type Config struct {
 	Addr              string
 	PublicURL         string
 	PublicOrigin      string
-	RPID              string
+	OIDCIssuer        string
+	OIDCClientID      string
+	OIDCClientSecret  string
+	OIDCOwnerSubject  string
 	DataDir           string
 	DatabasePath      string
 	SecureCookies     bool
@@ -42,10 +45,6 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("PAGEGLEAN_PUBLIC_URL must be an origin without credentials, query, or fragment")
 	}
 
-	rpID := strings.TrimSpace(os.Getenv("PAGEGLEAN_RP_ID"))
-	if rpID == "" {
-		rpID = parsed.Hostname()
-	}
 	dataDir := envOr("PAGEGLEAN_DATA_DIR", "./data")
 	absDataDir, err := filepath.Abs(dataDir)
 	if err != nil {
@@ -63,7 +62,10 @@ func Load() (Config, error) {
 		WebhookMode: webhookMode, WebhookURL: webhookURL, WebhookSecret: webhookSecret, WebhookToken: webhookToken, Addr: envOr("PAGEGLEAN_ADDR", ":8080"),
 		PublicURL:         strings.TrimRight(origin, "/"),
 		PublicOrigin:      origin,
-		RPID:              rpID,
+		OIDCIssuer:        strings.TrimSpace(os.Getenv("PAGEGLEAN_OIDC_ISSUER")),
+		OIDCClientID:      strings.TrimSpace(os.Getenv("PAGEGLEAN_OIDC_CLIENT_ID")),
+		OIDCClientSecret:  os.Getenv("PAGEGLEAN_OIDC_CLIENT_SECRET"),
+		OIDCOwnerSubject:  strings.TrimSpace(os.Getenv("PAGEGLEAN_OIDC_OWNER_SUBJECT")),
 		DataDir:           absDataDir,
 		DatabasePath:      filepath.Join(absDataDir, "pageglean.db"),
 		SecureCookies:     parsed.Scheme == "https",
@@ -124,4 +126,15 @@ func ValidateWebhookConfig(mode, endpoint, secret, token string) error {
 	default:
 		return fmt.Errorf("PAGEGLEAN_WEBHOOK_MODE must be generic or rivet")
 	}
+}
+
+func (c Config) ValidateOIDC() error {
+	if c.OIDCIssuer == "" || c.OIDCClientID == "" || c.OIDCClientSecret == "" || c.OIDCOwnerSubject == "" {
+		return fmt.Errorf("PAGEGLEAN_OIDC_ISSUER, PAGEGLEAN_OIDC_CLIENT_ID, PAGEGLEAN_OIDC_CLIENT_SECRET and PAGEGLEAN_OIDC_OWNER_SUBJECT are required")
+	}
+	u, err := url.Parse(c.OIDCIssuer)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.ForceQuery || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"))) {
+		return fmt.Errorf("PAGEGLEAN_OIDC_ISSUER must use HTTPS (HTTP is allowed only on loopback), without credentials, query or fragment")
+	}
+	return nil
 }

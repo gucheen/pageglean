@@ -7,6 +7,8 @@ const source = readFileSync(`${__dirname}/assets/app.js`, "utf8");
 
 function createApp(path = "/?q=old") {
   const location = new URL(path, "https://example.test");
+  let assigned;
+  location.assign = value => { assigned = new URL(value, location); };
   function node(dataset = {}) {
     return {
       dataset, value: "", attributes: {}, listeners: {},
@@ -59,6 +61,7 @@ function createApp(path = "/?q=old") {
   return {
     location, links, filters, requests, timers, entries, get,
     state: () => vm.runInContext("state", context),
+    login() { vm.runInContext("loginOIDC()", context); return assigned; },
     input(value) { get("#searchInput").value = value; get("#searchInput").listeners.input({ target: get("#searchInput") }); },
     click(scope, extra = {}) {
       let prevented = false;
@@ -130,4 +133,14 @@ test("results from an earlier query are ignored during debounce", async () => {
   app.requests[0].finish([{ id: 42 }]);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(app.state().bookmarks.length, 0);
+});
+
+
+test("OIDC login preserves capture parameters, fragments and workspace searches", () => {
+  for (const path of ["/add?url=https%3A%2F%2Fexample.com&title=Article", "/add#url=https%3A%2F%2Fexample.com&title=中文&note=Selected", "/library?q=中文"]) {
+    const app = createApp(path);
+    const login = app.login();
+    assert.equal(login.pathname, "/api/auth/login");
+    assert.equal(login.searchParams.get("return_to"), app.location.pathname + app.location.search + app.location.hash);
+  }
 });

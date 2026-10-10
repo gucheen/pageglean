@@ -6,7 +6,7 @@
 
 - 分组书签起始页，支持独立简称、置顶和固定排序
 - 独立资料库与跨区域搜索，同一链接可以同时用于日常访问和长期参考
-- Passkey-only 初始化、登录与 CLI 恢复
+- OIDC 单点登录与单用户账号授权
 - 书签栏快捷方式与独立添加页面，预填网址、标题和选中文字
 - 受资源限制的后台正文提取与 gzip Blob 归档
 - SQLite FTS5、中文二元词和中英文混合检索
@@ -23,24 +23,30 @@
 
 ## 本地运行
 
-Passkey 在 `localhost` 可以使用 HTTP；正式部署必须使用 HTTPS 和稳定域名。
+正式部署使用 HTTPS。先在身份服务中创建 OIDC 客户端，启用授权码流程和 PKCE S256，并注册回调地址 `http://localhost:8080/api/auth/callback`。
 
 ```bash
 export CGO_ENABLED=0
 export PAGEGLEAN_PUBLIC_URL=http://localhost:8080
 export PAGEGLEAN_DATA_DIR=./data
+export PAGEGLEAN_OIDC_ISSUER=https://id.example.com
+export PAGEGLEAN_OIDC_CLIENT_ID=pageglean
+export PAGEGLEAN_OIDC_CLIENT_SECRET=your-client-secret
+export PAGEGLEAN_OIDC_OWNER_SUBJECT=your-user-sub
 
-go run ./cmd/pageglean admin setup-link
 go run ./cmd/pageglean serve
 ```
 
-打开 `admin setup-link` 输出的一次性地址，注册第一个 Passkey。
+打开应用并点击“使用 OIDC 登录”。只有 `PAGEGLEAN_OIDC_OWNER_SUBJECT` 对应的账号可以访问私有数据；请从身份服务获取该用户在此客户端下的 `sub`，不要填写邮箱或用户名。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `PAGEGLEAN_ADDR` | `:8080` | HTTP 监听地址 |
 | `PAGEGLEAN_PUBLIC_URL` | `http://localhost:8080` | 用户实际访问应用的完整 Origin |
-| `PAGEGLEAN_RP_ID` | 从公开 URL 推导 | WebAuthn RP ID，部署后应保持稳定 |
+| `PAGEGLEAN_OIDC_ISSUER` | 必填 | OIDC issuer，必须与发现文档中的 issuer 完全一致；HTTPS，本机开发允许 loopback HTTP |
+| `PAGEGLEAN_OIDC_CLIENT_ID` | 必填 | OIDC 客户端 ID |
+| `PAGEGLEAN_OIDC_CLIENT_SECRET` | 必填 | 服务端客户端密钥 |
+| `PAGEGLEAN_OIDC_OWNER_SUBJECT` | 必填 | 唯一允许登录的用户 `sub` |
 | `PAGEGLEAN_DATA_DIR` | `./data` | SQLite、归档 Blob 数据目录 |
 | `PAGEGLEAN_ALLOW_PRIVATE_FETCH` | `false` | 是否允许后台抓取私网/本机 URL |
 
@@ -49,12 +55,6 @@ SQLite 由纯 Go 的 `modernc.org/sqlite` 驱动提供，无需启用 CGO；FTS5
 ## 管理命令
 
 ```bash
-# 首次初始化
-CGO_ENABLED=0 go run ./cmd/pageglean admin setup-link --ttl 10m
-
-# Passkey 丢失后的恢复入口
-CGO_ENABLED=0 go run ./cmd/pageglean admin recovery-link --ttl 10m
-
 # 创建完整备份，已存在的目标文件不会被覆盖
 CGO_ENABLED=0 go run ./cmd/pageglean admin backup --output pageglean-backup.tar.gz
 
@@ -78,7 +78,7 @@ CGO_ENABLED=0 go run ./cmd/pageglean admin verify-backup --input pageglean-backu
 
 在“设置 → 书签栏快捷方式”中，把“保存到拾页”拖到浏览器书签栏。浏览网页时点击它，会打开独立的添加页面，预填网址、标题和选中文字（备注）。保存前可以修改网址、标题、备注、标签，以及稍后阅读、星标和正文归档选项。
 
-未登录时先完成 Passkey 登录，预填内容会保留。归档选项由服务器抓取公开网页，不包含浏览器的登录状态。部分浏览器内置页面或受限制的网站无法运行书签脚本，可直接打开 `/add` 手动填写。
+未登录时先完成 OIDC 登录，预填内容会保留。归档选项由服务器抓取公开网页，不包含浏览器的登录状态。部分浏览器内置页面或受限制的网站无法运行书签脚本，可直接打开 `/add` 手动填写。
 
 ## 公开书签与更新通知
 
@@ -116,11 +116,14 @@ docker pull ghcr.io/gucheen/pageglean:latest
 
 ```bash
 export PAGEGLEAN_PUBLIC_URL=https://pageglean.example.com
+export PAGEGLEAN_OIDC_ISSUER=https://id.example.com
+export PAGEGLEAN_OIDC_CLIENT_ID=pageglean
+export PAGEGLEAN_OIDC_CLIENT_SECRET=your-client-secret
+export PAGEGLEAN_OIDC_OWNER_SUBJECT=your-user-sub
 export PAGEGLEAN_UID=$(id -u)
 export PAGEGLEAN_GID=$(id -g)
 mkdir -p data
 docker compose up --build -d
-docker compose exec pageglean /app/pageglean admin setup-link
 ```
 
-镜像默认以非 root 用户 `10001:10001` 运行；Compose 会通过 `PAGEGLEAN_UID` 和 `PAGEGLEAN_GID` 对齐宿主机 `data/` 目录的所有者。反向代理负责 TLS。`PAGEGLEAN_PUBLIC_URL`、实际访问 Origin 和 Passkey RP ID 必须保持一致。
+镜像默认以非 root 用户 `10001:10001` 运行；Compose 会通过 `PAGEGLEAN_UID` 和 `PAGEGLEAN_GID` 对齐宿主机 `data/` 目录的所有者。反向代理负责 TLS。`PAGEGLEAN_PUBLIC_URL` 必须与实际访问 Origin 保持一致；身份服务中注册的回调地址为 `${PAGEGLEAN_PUBLIC_URL}/api/auth/callback`。

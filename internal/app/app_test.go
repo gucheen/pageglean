@@ -27,7 +27,7 @@ func newTestApp(t *testing.T) (*App, *store.Store) {
 	t.Cleanup(func() { _ = data.Close() })
 	cfg := config.Config{
 		PublicURL: "http://localhost:8080", PublicOrigin: "http://localhost:8080",
-		RPID: "localhost", SecureCookies: false, DataDir: t.TempDir(),
+		OIDCIssuer: newTestProvider(t).URL, OIDCClientID: "pageglean", OIDCClientSecret: "secret", OIDCOwnerSubject: "owner", SecureCookies: false, DataDir: t.TempDir(),
 	}
 	application, err := New(cfg, data, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
@@ -36,7 +36,7 @@ func newTestApp(t *testing.T) (*App, *store.Store) {
 	return application, data
 }
 
-func TestStatusReportsSetupRequired(t *testing.T) {
+func TestStatusReportsAuthentication(t *testing.T) {
 	application, _ := newTestApp(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	response := httptest.NewRecorder()
@@ -51,53 +51,14 @@ func TestStatusReportsSetupRequired(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	if !payload.SetupRequired || payload.Authenticated {
+	if payload.SetupRequired || payload.Authenticated {
 		t.Fatalf("unexpected payload: %#v", payload)
-	}
-}
-
-func TestRegistrationStartCreatesUnexpiredCeremony(t *testing.T) {
-	application, data := newTestApp(t)
-	setupToken, err := data.CreateAdminToken(t.Context(), "setup", 10*time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(map[string]string{"token": setupToken, "label": "Passkey"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/register/start", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	application.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
-	}
-	var ceremonyCookie *http.Cookie
-	for _, cookie := range response.Result().Cookies() {
-		if cookie.Name == ceremonyCookieName {
-			ceremonyCookie = cookie
-			break
-		}
-	}
-	if ceremonyCookie == nil {
-		t.Fatal("registration start did not set the ceremony cookie")
-	}
-	if ceremonyCookie.MaxAge <= 0 || !ceremonyCookie.Expires.After(time.Now()) {
-		t.Fatalf("ceremony cookie is already expired: %#v", ceremonyCookie)
-	}
-	session, _, err := data.TakeCeremony(t.Context(), ceremonyCookie.Value, "registration")
-	if err != nil {
-		t.Fatalf("stored ceremony is already expired: %v", err)
-	}
-	if !session.Expires.After(time.Now()) {
-		t.Fatalf("stored ceremony expiry = %s", session.Expires)
 	}
 }
 
 func TestOriginCheckRejectsCrossSiteMutation(t *testing.T) {
 	application, _ := newTestApp(t)
-	request := httptest.NewRequest(http.MethodPost, "/api/auth/login/start", nil)
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	request.Header.Set("Origin", "https://evil.example")
 	response := httptest.NewRecorder()
 	application.Handler().ServeHTTP(response, request)
@@ -127,7 +88,7 @@ func TestAuthenticatedExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, application.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +103,7 @@ func TestAuthenticatedExport(t *testing.T) {
 
 func TestAuthenticatedHTMLImportSkipsArchiveByDefault(t *testing.T) {
 	application, data := newTestApp(t)
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, application.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +142,7 @@ func TestAuthenticatedBulkUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, application.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +172,7 @@ func TestBookmarkArchiveChoice(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			application, data := newTestApp(t)
-			token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+			token, err := data.CreateAppSession(t.Context(), 1, time.Hour, application.authIdentity())
 			if err != nil {
 				t.Fatal(err)
 			}

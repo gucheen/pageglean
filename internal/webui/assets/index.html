@@ -10,18 +10,13 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body data-authenticated="{{.Authenticated}}" data-setup-required="{{.SetupRequired}}">
+  <body data-authenticated="{{.Authenticated}}">
     <main id="authView" class="center-shell" {{if not .ShowAuth}}hidden{{end}}>
       <section class="auth-card">
         <div class="brand brand-large"><span class="brand-mark">拾</span><span>拾页</span></div>
-        <h1 id="authTitle">用 Passkey 登录</h1>
+        <h1 id="authTitle">登录拾页</h1>
         <p id="authDescription" class="auth-description">登录后使用书签首页和资料库；只有你主动公开的书签可供访客查看。</p>
-        <button id="authButton" class="button button-primary button-wide" type="button">使用 Passkey</button>
-        <div id="setupHelp" class="setup-help" hidden>
-          <p>应用尚未初始化。请先在服务器执行：</p>
-          <code>pageglean admin setup-link</code>
-          <p>然后打开命令输出的一次性地址。</p>
-        </div>
+        <button id="authButton" class="button button-primary button-wide" type="button">使用 OIDC 登录</button>
         <p id="authError" class="form-error" role="alert"></p>
       </section>
       <a class="text-button" href="/public/">浏览公开书签</a>

@@ -18,7 +18,7 @@ import (
 
 func TestWorkspaceAPIAndExportRoundTrip(t *testing.T) {
 	a, data := newTestApp(t)
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, a.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestWorkspaceAPIAndExportRoundTrip(t *testing.T) {
 
 func TestImportBrowserBookmarksToHome(t *testing.T) {
 	a, data := newTestApp(t)
-	token, err := data.CreateAppSession(t.Context(), 1, time.Hour)
+	token, err := data.CreateAppSession(t.Context(), 1, time.Hour, a.authIdentity())
 	if err != nil {
 		t.Fatal(err)
 	}
