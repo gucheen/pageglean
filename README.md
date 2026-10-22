@@ -23,6 +23,8 @@
 
 ## 本地运行
 
+本地开发需要 Go 1.27 或更新版本，建议使用对应版本的最新补丁版本。
+
 正式部署使用 HTTPS。先在身份服务中创建 OIDC 客户端，启用授权码流程和 PKCE S256，并注册回调地址 `http://localhost:8080/api/auth/callback`。
 
 ```bash
